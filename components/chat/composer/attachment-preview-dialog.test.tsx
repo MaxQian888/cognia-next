@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { DEFAULT_VIDEO_SETTINGS } from "@/lib/chat/attachments/video/settings"
@@ -27,7 +27,7 @@ function ready(over: Partial<StagedAttachmentState> = {}): StagedAttachmentState
   return {
     status: "ready",
     sizeBytes: 2048,
-    extracted: { kind: "document", block: { type: "text", text: "x" }, tokens: 0 },
+    extracted: { kind: "document", block: { type: "text", text: "x" }, text: "x", tokens: 0 },
     ...over,
   }
 }
@@ -57,8 +57,11 @@ describe("AttachmentPreviewDialog — header", () => {
       }),
     })
     const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("w-[min(94vw,1200px)]")
+    expect(dialog.className).toContain("sm:max-w-none")
+    expect(dialog).toHaveClass("h-[min(85dvh,720px)]")
     expect(within(dialog).getByRole("heading", { name: "report.pdf" })).toBeInTheDocument()
-    expect(within(dialog).getByText(/application\/pdf/)).toHaveTextContent("2.0KB")
+    expect(within(dialog).getByText(/2.0KB/)).toHaveTextContent("310 tokens")
     expect(within(dialog).getByText(/310 tokens/)).toBeInTheDocument()
   })
 
@@ -75,11 +78,68 @@ describe("AttachmentPreviewDialog — header", () => {
   // The lightbox's "Model view" action drops the user straight into the audit.
   it("can open directly on the model tab", () => {
     renderDialog({ initialTab: "model" })
-    expect(screen.getByRole("tab", { name: "Model view" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "Processed" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("keeps a fixed dialog size for a short download-only file and across tabs", async () => {
+    renderDialog({
+      target: {
+        id: "log",
+        filename: "output.bin",
+        mediaType: "application/octet-stream",
+        url: "blob:log",
+      },
+      state: { status: "rejected", sizeBytes: 10 },
+    })
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveClass("h-[min(85dvh,720px)]", "w-[min(94vw,1200px)]")
+    expect(within(dialog).getByRole("link", { name: /Download output.bin/ })).toBeInTheDocument()
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
+    expect(screen.getByRole("dialog")).toHaveClass("h-[min(85dvh,720px)]")
   })
 })
 
 describe("AttachmentPreviewDialog — file tab", () => {
+  it("shows the original log body on the file tab instead of the model payload or download card", async () => {
+    const originalFetch = global.fetch
+    const fetchFile = jest
+      .fn()
+      .mockResolvedValue({ ok: true, text: async () => "source log line\nsecond line" })
+    global.fetch = fetchFile as unknown as typeof fetch
+    try {
+      renderDialog({
+        target: {
+          id: "log",
+          filename: "output.log",
+          mediaType: "application/octet-stream",
+          url: "blob:source-log",
+        },
+        state: ready({
+          extracted: {
+            kind: "document",
+            block: { type: "text", text: "MODEL ONLY WRAPPER" },
+            text: "MODEL ONLY WRAPPER",
+            tokens: 5,
+          },
+        }),
+      })
+      const fileTab = screen.getByRole("tabpanel", { name: "Original" })
+      await waitFor(() =>
+        expect(within(fileTab).getByTestId("file-preview-text")).toHaveTextContent(
+          "source log line"
+        )
+      )
+      expect(
+        within(fileTab).queryByRole("link", { name: /Download output.log/ })
+      ).not.toBeInTheDocument()
+      expect(within(fileTab).queryByText("MODEL ONLY WRAPPER")).not.toBeInTheDocument()
+      expect(screen.getByRole("tab", { name: "Original" })).toHaveAttribute("aria-selected", "true")
+      expect(fetchFile).toHaveBeenCalledWith("blob:source-log")
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
   it("shows the empty state for a target with no url", () => {
     renderDialog({ target: { id: "x", filename: "gone.pdf" } })
     expect(screen.getByText("Nothing was extracted from this file.")).toBeInTheDocument()
@@ -87,6 +147,10 @@ describe("AttachmentPreviewDialog — file tab", () => {
 
   it("renders an image inline with a full-size escape hatch", () => {
     renderDialog({ target: IMG, state: ready() })
+    expect(screen.getByRole("tab", { name: "Original file" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
     expect(screen.getByAltText("shot.png")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Full size" })).toBeInTheDocument()
   })
@@ -111,6 +175,123 @@ describe("AttachmentPreviewDialog — file tab", () => {
   })
 })
 
+describe("AttachmentPreviewDialog — document layout", () => {
+  const target = { id: "log", filename: "output.log", mediaType: "text/plain", url: "blob:log" }
+  const body = "source log line\nsecond line"
+  const originalFetch = global.fetch
+  const textState = (text = `Attached file "output.log":\n\n${body}`) =>
+    ready({
+      bytes: new TextEncoder().encode(body),
+      extracted: { kind: "document", block: { type: "text", text }, text, tokens: 10 },
+    })
+
+  beforeEach(() => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, text: async () => body })
+  })
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it("hides duplicate processed text, focuses the heading and keeps tools in one header", async () => {
+    renderDialog({ target, state: textState(), initialTab: "model" })
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument()
+    const heading = screen.getByRole("heading", { name: "output.log" })
+    expect(heading).toHaveFocus()
+    const toolbar = screen.getByRole("toolbar", { name: "File preview controls" })
+    const copy = await within(toolbar).findByRole("button", { name: "Copy code" })
+    expect(copy).toBeVisible()
+    expect(within(toolbar).getByRole("link", { name: "Download output.log" })).toHaveAttribute(
+      "href",
+      "blob:log"
+    )
+    expect(screen.getAllByText("output.log")).toHaveLength(1)
+    expect(screen.getByLabelText("Code in text")).toHaveTextContent("source log line")
+    expect(screen.getByLabelText("Code in text").closest("[data-rich-block]")).toBeNull()
+    await user().click(within(toolbar).getByRole("button", { name: "Enable word wrap" }))
+    expect(within(toolbar).getByRole("button", { name: "Disable word wrap" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+  })
+
+  it("keeps a lightweight processed tab for changed text and clears original-only tools on switch", async () => {
+    renderDialog({ target, state: textState("Mail <EMAIL_001> today") })
+    const tablist = screen.getByRole("tablist")
+    expect(tablist).toHaveAttribute("data-variant", "line")
+    const toolbar = screen.getByRole("toolbar", { name: "File preview controls" })
+    await within(toolbar).findByRole("button", { name: "Copy code" })
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
+    expect(screen.getByText("<EMAIL_001>")).toBeVisible()
+    expect(within(toolbar).queryByRole("button", { name: "Copy code" })).not.toBeInTheDocument()
+    await user().click(screen.getByRole("tab", { name: "Original" }))
+    expect(await within(toolbar).findByRole("button", { name: "Copy code" })).toBeVisible()
+    expect(screen.getByRole("dialog")).toHaveClass("h-[min(85dvh,720px)]")
+  })
+
+  it("ignores the dispatch filename and code fence when the JSON body is unchanged", () => {
+    const json = '{"ok":true}'
+    const text = `Attached file "output.json":\n\n\`\`\`json\n${json}\n\`\`\``
+    renderDialog({
+      target: { ...target, filename: "output.json", mediaType: "application/json" },
+      state: ready({
+        bytes: new TextEncoder().encode(json + "\r\n"),
+        extracted: { kind: "document", block: { type: "text", text }, text, tokens: 10 },
+      }),
+    })
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument()
+  })
+
+  it("returns to the original when processing settles with identical content", async () => {
+    const view = renderDialog({
+      target,
+      state: { status: "extracting", sizeBytes: 10 },
+      initialTab: "model",
+    })
+    expect(screen.getByRole("tab", { name: "Processed" })).toHaveAttribute("aria-selected", "true")
+    view.rerender(
+      <TooltipProvider>
+        <AttachmentPreviewDialog
+          open
+          onOpenChange={jest.fn()}
+          target={target}
+          state={textState()}
+          videoRoute={{ available: false, reason: "runtime" }}
+          onApplyVideoSettings={jest.fn()}
+        />
+      </TooltipProvider>
+    )
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument()
+    expect(await screen.findByLabelText("Code in text")).toHaveTextContent("source log line")
+  })
+
+  it("switches an open dialog to another file without retaining its body, tab or tools", async () => {
+    const view = renderDialog({ target, state: textState("Changed extraction") })
+    await screen.findByRole("button", { name: "Copy code" })
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
+    expect(screen.getByText("Changed extraction")).toBeVisible()
+    view.rerender(
+      <TooltipProvider>
+        <AttachmentPreviewDialog
+          open
+          onOpenChange={jest.fn()}
+          target={{ ...DOC, id: "next", filename: "other.pdf" }}
+          state={ready()}
+          videoRoute={{ available: false, reason: "runtime" }}
+          onApplyVideoSettings={jest.fn()}
+        />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("heading", { name: "other.pdf" })).toBeVisible()
+    expect(screen.getByRole("tab", { name: "Original" })).toHaveAttribute("aria-selected", "true")
+    expect(
+      within(screen.getByRole("tabpanel", { name: "Original" })).getByLabelText("other.pdf")
+    ).toHaveAttribute("data", DOC.url)
+    expect(screen.queryByRole("button", { name: "Copy code" })).not.toBeInTheDocument()
+    expect(screen.queryByText("Changed extraction")).not.toBeInTheDocument()
+    expect(screen.queryByText("source log line")).not.toBeInTheDocument()
+  })
+})
+
 describe("AttachmentPreviewDialog — model view", () => {
   it("shows the extracted text the model actually receives", async () => {
     renderDialog({
@@ -123,7 +304,7 @@ describe("AttachmentPreviewDialog — model view", () => {
         },
       }),
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByText(/the body/)).toBeInTheDocument()
     expect(
       screen.getByText(
@@ -143,7 +324,7 @@ describe("AttachmentPreviewDialog — model view", () => {
         },
       }),
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByTestId("redacted-span")).toHaveTextContent("<EMAIL_001>")
     expect(screen.getByTestId("redaction-note")).toBeInTheDocument()
   })
@@ -159,13 +340,13 @@ describe("AttachmentPreviewDialog — model view", () => {
         },
       }),
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.queryByTestId("redaction-note")).not.toBeInTheDocument()
   })
 
   it("reports progress while the file is still being read", async () => {
     renderDialog({ state: { status: "extracting", sizeBytes: 0 } })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByText("Reading…")).toBeInTheDocument()
   })
 
@@ -173,7 +354,7 @@ describe("AttachmentPreviewDialog — model view", () => {
   // indicator — opening the panel mid-wait is visually continuous.
   it("reports an image's wait as analysis, matching its chip", async () => {
     renderDialog({ target: IMG, state: { status: "extracting", sizeBytes: 0 } })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getAllByText("Analyzing image…").length).toBeGreaterThan(0)
     expect(screen.queryByText("Reading…")).not.toBeInTheDocument()
   })
@@ -190,7 +371,7 @@ describe("AttachmentPreviewDialog — model view", () => {
         },
       }),
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByTestId("model-view-image")).toBeInTheDocument()
     expect(screen.getByText(/1568px/)).toHaveTextContent("4.0KB")
   })
@@ -203,7 +384,7 @@ describe("AttachmentPreviewDialog — model view", () => {
         extracted: { kind: "document", block: null, tokens: 0, rejectReason: "empty" },
       },
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByText("Nothing was extracted from this file.")).toBeInTheDocument()
   })
 })
@@ -218,14 +399,14 @@ describe("AttachmentPreviewDialog — OCR layer", () => {
   it("offers to run OCR when no text exists yet", async () => {
     const onRunOcr = jest.fn()
     renderDialog({ target: IMG, state: imageState(), onRunOcr })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     await user().click(screen.getByRole("button", { name: "Run OCR" }))
     expect(onRunOcr).toHaveBeenCalledWith("i")
   })
 
   it("disables the trigger and reports progress while OCR runs", async () => {
     renderDialog({ target: IMG, state: imageState(), onRunOcr: jest.fn(), ocrBusy: true })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     const button = screen.getByRole("button", { name: "Running OCR…" })
     expect(button).toBeDisabled()
   })
@@ -239,7 +420,7 @@ describe("AttachmentPreviewDialog — OCR layer", () => {
       state: imageState({ ocrText: "recognised words", includeOcr: false }),
       onToggleIncludeOcr,
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByText("recognised words")).toBeInTheDocument()
     const toggle = screen.getByRole("switch")
     expect(toggle).not.toBeChecked()
@@ -249,7 +430,7 @@ describe("AttachmentPreviewDialog — OCR layer", () => {
 
   it("hides the follow-up routes when their handlers are absent", async () => {
     renderDialog({ target: IMG, state: imageState({ ocrText: "words" }) })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.queryByRole("button", { name: "View per-page result" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Add text to message" })).not.toBeInTheDocument()
   })
@@ -263,7 +444,7 @@ describe("AttachmentPreviewDialog — OCR layer", () => {
       onViewOcrDetail,
       onExtractOcrToInput,
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     await user().click(screen.getByRole("button", { name: "View per-page result" }))
     expect(onViewOcrDetail).toHaveBeenCalled()
     await user().click(screen.getByRole("button", { name: "Add text to message" }))
@@ -324,7 +505,7 @@ describe("AttachmentPreviewDialog — videos and GIFs", () => {
       videoRoute: { available: true },
       onApplyVideoSettings,
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     const panel = screen.getByTestId("video-preprocess-panel")
     expect(within(panel).getByAltText("Storyboard of clip.mp4")).toBeInTheDocument()
     expect(within(panel).getByRole("radio", { name: "Original video" })).toBeEnabled()
@@ -339,7 +520,7 @@ describe("AttachmentPreviewDialog — videos and GIFs", () => {
 
   it("passes the conversation's route verdict through", async () => {
     renderDialog({ target: CLIP, state: motionReady() })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByRole("radio", { name: "Original video" })).toBeDisabled()
     expect(screen.getByTestId("native-blocked")).toHaveTextContent(
       "this model's runtime doesn't accept video files"
@@ -348,7 +529,7 @@ describe("AttachmentPreviewDialog — videos and GIFs", () => {
 
   it("shows the panel's progress rather than the document spinner while a video waits", async () => {
     renderDialog({ target: CLIP, state: { status: "extracting", sizeBytes: 0 } })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByTestId("video-preprocess-panel")).toBeInTheDocument()
     expect(screen.queryByText("Reading…")).not.toBeInTheDocument()
   })
@@ -373,7 +554,7 @@ describe("AttachmentPreviewDialog — videos and GIFs", () => {
       },
     })
     expect(screen.getByAltText("loop.gif")).toHaveAttribute("src", "blob:loop")
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByTestId("video-preprocess-panel")).toBeInTheDocument()
   })
 
@@ -382,7 +563,7 @@ describe("AttachmentPreviewDialog — videos and GIFs", () => {
       target: LOOP,
       state: ready({ extracted: { kind: "image", block: null, tokens: 0 } }),
     })
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.queryByTestId("video-preprocess-panel")).not.toBeInTheDocument()
     expect(screen.getByTestId("model-view-image")).toBeInTheDocument()
   })
@@ -399,7 +580,7 @@ describe("AttachmentPreviewDialog — cancellable media processing", () => {
       onProcessMedia,
     })
     expect(screen.getByLabelText("Play meeting.wav")).toHaveAttribute("src", "blob:audio")
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByRole("button", { name: "Transcribe audio" })).toBeDisabled()
     expect(onProcessMedia).not.toHaveBeenCalled()
   })

@@ -148,7 +148,12 @@ jest.mock("@/lib/tauri/opener", () => ({
 
 import { act, render, screen, fireEvent } from "@testing-library/react"
 import React from "react"
-import { MarkdownRenderer, addMarkdownHeadingIds, parseTaskListItem } from "./markdown-renderer"
+import {
+  MarkdownRenderer,
+  addMarkdownHeadingIds,
+  parseTaskListItem,
+  limitUntrustedMarkdownDepth,
+} from "./markdown-renderer"
 import { openExternal } from "@/lib/tauri/opener"
 import { clearAllLinkMatchers, registerLinkMatcher } from "@/lib/plugin/api/link-matchers"
 
@@ -682,6 +687,24 @@ describe("MarkdownRenderer", () => {
 })
 
 describe("addMarkdownHeadingIds", () => {
+  it("preserves ordinary nesting and flattens excessive external nesting to complete literal source", () => {
+    const shallow = {
+      type: "root",
+      children: [
+        { type: "element", tagName: "blockquote", children: [{ type: "text", value: "quote" }] },
+      ],
+    }
+    const previous = JSON.stringify(shallow)
+    limitUntrustedMarkdownDepth(shallow, "> quote")
+    expect(JSON.stringify(shallow)).toBe(previous)
+    type Node = { type: string; tagName?: string; value?: string; children?: Node[] }
+    let child: Node = { type: "text", value: "deep marker" }
+    for (let index = 0; index < 1500; index++) child = { type: "blockquote", children: [child] }
+    const tree = { type: "root", children: [child] }
+    const source = `${"> ".repeat(1500)}deep marker`
+    limitUntrustedMarkdownDepth(tree, source)
+    expect(tree.children).toEqual([{ type: "code", lang: "text", value: source }])
+  })
   it("adds stable slugs and disambiguates duplicate headings", () => {
     const tree = {
       type: "root",

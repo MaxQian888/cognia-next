@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { CODE_AUTO_RENDER_MAX_LINES, CodeBlock } from "./code-block"
 import { highlightCached, clearHighlightCache } from "@/lib/shiki/highlight-cache"
@@ -19,6 +19,67 @@ function renderInProvider(ui: React.ReactElement) {
 }
 
 describe("CodeBlock", () => {
+  it("copies full document content through the portal and can reveal a truncated tail", async () => {
+    const toolbar = document.createElement("div")
+    document.body.append(toolbar)
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    const code = Array.from({ length: CODE_AUTO_RENDER_MAX_LINES + 1 }, (_, i) => `line-${i}`).join(
+      "\n"
+    )
+    const view = renderInProvider(
+      <CodeBlock
+        code={code}
+        isStreaming
+        showLineNumbers={false}
+        presentation="document"
+        toolbarContainer={toolbar}
+      />
+    )
+    try {
+      expect(screen.getByRole("code")).not.toHaveTextContent(`line-${CODE_AUTO_RENDER_MAX_LINES}`)
+      fireEvent.click(within(toolbar).getByRole("button", { name: "Copy code" }))
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(code))
+      fireEvent.click(screen.getByRole("button", { name: /show all/i }))
+      expect(screen.getByRole("code")).toHaveTextContent(`line-${CODE_AUTO_RENDER_MAX_LINES}`)
+    } finally {
+      view.unmount()
+      toolbar.remove()
+    }
+  })
+
+  it("renders an unframed document with working controls in the host toolbar", async () => {
+    const toolbar = document.createElement("div")
+    document.body.append(toolbar)
+    const view = renderInProvider(
+      <CodeBlock
+        code="original body"
+        filename="source.log"
+        presentation="document"
+        toolbarContainer={toolbar}
+      />
+    )
+    try {
+      expect(screen.getByRole("code")).toHaveTextContent("original body")
+      expect(view.container.querySelector("[data-rich-block]")).toBeNull()
+      expect(screen.queryByText("source.log")).not.toBeInTheDocument()
+      fireEvent.click(within(toolbar).getByRole("button", { name: "Enable word wrap" }))
+      expect(within(toolbar).getByRole("button", { name: "Disable word wrap" })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      fireEvent.click(within(toolbar).getByRole("button", { name: "Hide line numbers" }))
+      expect(within(toolbar).getByRole("button", { name: "Show line numbers" })).toBeVisible()
+      expect(within(toolbar).getByRole("button", { name: "Copy code" })).toBeVisible()
+      expect(
+        within(toolbar).queryByRole("button", { name: /Download|full screen/i })
+      ).not.toBeInTheDocument()
+    } finally {
+      view.unmount()
+      toolbar.remove()
+    }
+  })
+
   it("renders the code text", () => {
     const { getByText } = renderInProvider(<CodeBlock code="const x = 1" language="ts" />)
     expect(getByText(/const x = 1/)).toBeInTheDocument()

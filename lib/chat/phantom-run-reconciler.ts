@@ -74,7 +74,7 @@ export interface PhantomRunStore {
     >
     replaceSessionMessages: (id: string, msgs: UIMessage[]) => void
     markApprovalInterrupted: (requestId: string, sessionId?: string, reason?: string) => void
-    setSessionStatus: (id: string, s: ChatStatus) => void
+    setSessionStatus: (id: string, s: ChatStatus, options?: { turnOutcome: "interrupted" }) => void
   }
   subscribe: (listener: () => void) => () => void
 }
@@ -152,7 +152,7 @@ export async function reconcileSessionRun(
     )
   }
   // Last, so the approval bookkeeping above cannot flip it back to streaming.
-  store.getState().setSessionStatus(sessionId, "idle")
+  store.getState().setSessionStatus(sessionId, "idle", { turnOutcome: "interrupted" })
   return "settled"
 }
 

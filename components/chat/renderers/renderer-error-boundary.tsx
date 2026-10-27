@@ -12,12 +12,15 @@ interface RendererErrorBoundaryProps {
   fallback?: ReactNode
   className?: string
   rendererName?: string
+  /** A new input may recover from a failure of the previous input. */
+  resetKey?: unknown
   onError?: (error: Error, errorInfo: React.ErrorInfo) => void
 }
 
 interface RendererErrorBoundaryState {
   hasError: boolean
   error: Error | null
+  resetKey?: unknown
 }
 
 export class RendererErrorBoundary extends Component<
@@ -26,7 +29,16 @@ export class RendererErrorBoundary extends Component<
 > {
   constructor(props: RendererErrorBoundaryProps) {
     super(props)
-    this.state = { hasError: false, error: null }
+    this.state = { hasError: false, error: null, resetKey: props.resetKey }
+  }
+
+  static getDerivedStateFromProps(
+    props: RendererErrorBoundaryProps,
+    state: RendererErrorBoundaryState
+  ): Partial<RendererErrorBoundaryState> | null {
+    return Object.is(props.resetKey, state.resetKey)
+      ? null
+      : { hasError: false, error: null, resetKey: props.resetKey }
   }
 
   static getDerivedStateFromError(error: Error): RendererErrorBoundaryState {

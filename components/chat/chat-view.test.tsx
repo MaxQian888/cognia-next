@@ -26,7 +26,7 @@ jest.mock("./chat-session-gates", () => ({
   ),
 }))
 jest.mock("@/components/inbox/platform-conversation-context", () => ({
-  PlatformConversationContext: () => null,
+  PlatformConversationContext: jest.fn(() => null),
 }))
 const mockPlanDockProps: Array<Record<string, unknown>> = []
 jest.mock("@/components/agent/plan/plan-approval-dock", () => ({
@@ -110,6 +110,10 @@ jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
 jest.mock("@/components/error/diagnostic-card", () => ({
   InlineError: jest.fn(() => null),
   DiagnosticCard: jest.fn(() => null),
+}))
+let mockSharedLive: unknown = null
+jest.mock("@/hooks/chat/use-shared-live-reply", () => ({
+  useSharedLiveReply: () => mockSharedLive,
 }))
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
@@ -302,6 +306,7 @@ jest.mock("@/lib/db/messages", () => ({
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { MessageList } from "./message-list"
 import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
 import { chatColumnClass } from "./chat-column"
@@ -400,6 +405,34 @@ describe("ChatPane shared blocking capabilities", () => {
     )
     expect(MockList.mock.calls.at(-1)?.[0]?.onRegenerate).toBeUndefined()
     expect(MockList.mock.calls.at(-1)?.[0]?.onEditResend).toBeUndefined()
+  })
+  it("docks platform activity in the composer and retains transcript ownership for read-only sessions", () => {
+    const { PlatformConversationContext } = jest.requireMock(
+      "@/components/inbox/platform-conversation-context"
+    ) as { PlatformConversationContext: jest.Mock }
+    const activeSession = {
+      ...mockSession,
+      platformBinding: {
+        platform: "onebot" as const,
+        adapterId: "adapter",
+        conversationKey: "onebot:adapter:group",
+        conversationRef: { platform: "onebot" as const, adapterId: "adapter" },
+      },
+    }
+    const view = render(<ChatPane {...makeProps()} activeSession={activeSession} />)
+    expect(PlatformConversationContext.mock.calls.at(-1)?.[0]).toMatchObject({
+      activityInComposer: true,
+    })
+    expect(mockComposerProps.at(-1)?.runStatus).toMatchObject({
+      props: { conversationKey: "onebot:adapter:group" },
+    })
+    view.rerender(
+      <ChatPane {...makeProps()} activeSession={{ ...activeSession, kind: "subagent" }} />
+    )
+    expect(screen.queryByTestId("composer")).not.toBeInTheDocument()
+    expect(PlatformConversationContext.mock.calls.at(-1)?.[0]).toMatchObject({
+      activityInComposer: false,
+    })
   })
   it("exposes approval and plan continuation without any host gate callbacks", () => {
     mockPaneRuntime.ownsDecisions = true
@@ -590,6 +623,9 @@ describe("ChatPane", () => {
   })
 
   it("mounts live Computer Use activity inside the real chat pane", async () => {
+    const geometry = jest
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 0, 1000, 600))
     publishComputerUseActivity("s1", "screenshot", {
       ok: true,
       output: "FRAME",
@@ -597,13 +633,21 @@ describe("ChatPane", () => {
       display_height_px: 900,
     })
 
-    render(<ChatPane {...makeProps()} />)
+    try {
+      render(
+        <TooltipProvider>
+          <ChatPane {...makeProps()} />
+        </TooltipProvider>
+      )
 
-    expect(await screen.findByRole("region", { name: "title" })).toBeInTheDocument()
-    expect(screen.getByRole("img", { name: "screenAlt" })).toHaveAttribute(
-      "src",
-      "data:image/png;base64,FRAME"
-    )
+      expect(await screen.findByRole("region", { name: "title" })).toBeInTheDocument()
+      expect(screen.getByRole("img", { name: "screenAlt" })).toHaveAttribute(
+        "src",
+        "data:image/png;base64,FRAME"
+      )
+    } finally {
+      geometry.mockRestore()
+    }
   })
 
   it("sends a queued configuration prompt once through the normal sender", async () => {
@@ -824,6 +868,35 @@ describe("ChatPane", () => {
       expect.objectContaining({ messageDisplayOverride: { preset: "focused" } }),
       undefined
     )
+  })
+
+  it("draws a shared run's live reply over the stored list and shows it streaming (ADR-0241)", () => {
+    mockSharedLive = {
+      sessionId: "s1",
+      messageId: "live-reply",
+      replyTo: "u",
+      seq: 1,
+      parts: [{ type: "text", text: "being written" }],
+      state: "streaming",
+      stale: false,
+    }
+    try {
+      const MockList = MessageList as jest.Mock
+      MockList.mockClear()
+      render(<ChatPane {...makeProps()} />)
+      const props = MockList.mock.calls.at(-1)?.[0] as {
+        messages: Array<{ id: string; parts: unknown[] }>
+        status: string
+      }
+      expect(props.messages.at(-1)).toEqual({
+        id: "live-reply",
+        role: "assistant",
+        parts: [{ type: "text", text: "being written" }],
+      })
+      expect(props.status).toBe(storeState.status === "idle" ? "streaming" : storeState.status)
+    } finally {
+      mockSharedLive = null
+    }
   })
 
   it("routes browser companion sessions through the bounded transcript surface", () => {

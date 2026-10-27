@@ -17,22 +17,31 @@ import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { DEFAULT_AUTO_ROUTING } from "@/types/routing/tool-route"
-import { getSession, updateSession } from "@/lib/db/sessions"
+import { getSession, updateSession, updateSessionAgentModel } from "@/lib/db/sessions"
 import { waitForModelSelection } from "@/lib/chat/model-selection"
 import { detectHostProfile } from "@/lib/platform/capabilities"
 import { useSettingsStore } from "@/stores/settings"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import enMessages from "@/i18n/messages/en.json"
+import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
+
+let mockPickerCharacter: import("@cognia/agent-config-types").Character | undefined
+jest.mock("@/lib/data-hooks/context", () => ({
+  ...jest.requireActual("@/lib/data-hooks/context"),
+  useCharacter: () => mockPickerCharacter,
+}))
 
 // The picker persists model switches through the Dexie sessions table —
 // irrelevant for trigger-rendering assertions.
 jest.mock("@/lib/db/sessions", () => ({
   updateSession: jest.fn(async () => undefined),
+  updateSessionAgentModel: jest.fn(async () => undefined),
   getSession: jest.fn(async () => undefined),
 }))
 
 const mockedUpdateSession = updateSession as unknown as jest.Mock
+const mockedUpdateAgentModel = updateSessionAgentModel as jest.Mock
 
 // Live-switch deps. The live path is gated on the HOST PROFILE (a shell that
 // has a sidecar of its own or is paired to one), not on the webview kind.
@@ -1381,6 +1390,7 @@ describe("an external agent's own models", () => {
 
   beforeEach(() => {
     mockedUpdateSession.mockClear()
+    mockedUpdateAgentModel.mockClear()
     mockAgentModels.select.mockClear()
     ;(toast.error as jest.Mock).mockClear()
     mockAgentModels.agentId = "pi-1"
@@ -1725,8 +1735,9 @@ describe("an external agent's own models", () => {
     // session, in the conversation's per-agent column. The built-in lane's
     // `model` / `providerOverride` are never touched by an agent pick.
     await waitFor(() =>
-      expect(mockedUpdateSession).toHaveBeenCalledWith("ses_ext", {
-        externalAgentModels: { "pi-1": { kind: "native", modelId: "openai/agent-gpt" } },
+      expect(mockedUpdateAgentModel).toHaveBeenCalledWith("ses_ext", "pi-1", {
+        kind: "native",
+        modelId: "openai/agent-gpt",
       })
     )
   })
@@ -1745,6 +1756,8 @@ describe("an external agent's own models", () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     expect(mockedUpdateSession).not.toHaveBeenCalled()
+    expect(mockedUpdateAgentModel).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("Agent Sonnet")
   })
 
   it("writes the app default when there is no conversation to override", () => {
@@ -1765,6 +1778,219 @@ describe("an external agent's own models", () => {
       defaultProvider: "anthropic",
     })
     expect(mockedUpdateSession).not.toHaveBeenCalled()
+  })
+
+  it("retires a saved external choice so later saved changes are authoritative", async () => {
+    mockAgentModels.surface!.write = { kind: "session-seed" }
+    const a = {
+      ...session,
+      externalAgentModels: {
+        "pi-1": { kind: "native" as const, modelId: "anthropic/agent-sonnet" },
+      },
+    }
+    const b = {
+      ...a,
+      externalAgentModels: { "pi-1": { kind: "native" as const, modelId: "openai/agent-gpt" } },
+    }
+    const { rerender } = renderPicker(a)
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByText("Agent GPT"))
+    await waitFor(() => expect(mockedUpdateAgentModel).toHaveBeenCalled())
+    const tree = (value: ChatSession) => (
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <TooltipProvider>
+          <ModelPicker session={value} />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    rerender(tree(b))
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("Agent GPT")
+    rerender(tree(a))
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("Agent Sonnet")
+  })
+
+  it("holds the send barrier until live external model application and persistence finish", async () => {
+    let release!: () => void
+    let releaseWrite!: () => void
+    mockedUpdateAgentModel.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseWrite = resolve
+        })
+    )
+    mockAgentModels.select.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByText("Agent GPT"))
+    expect(mockAgentModels.select).toHaveBeenCalled()
+    let ready = false
+    const waiting = waitForModelSelection(session.id).then(() => {
+      ready = true
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const readyBeforeApply = ready
+    await act(async () => {
+      release()
+    })
+    await waitFor(() => expect(mockedUpdateAgentModel).toHaveBeenCalled())
+    const readyBeforeWrite = ready
+    await act(async () => {
+      releaseWrite()
+      await waiting
+    })
+    expect(readyBeforeApply).toBe(false)
+    expect(readyBeforeWrite).toBe(false)
+    expect(ready).toBe(true)
+    expect(mockedUpdateAgentModel).toHaveBeenCalled()
+  })
+
+  it("serializes external model applies and ignores a superseded failure", async () => {
+    let rejectFirst!: (error: Error) => void
+    mockAgentModels.select.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectFirst = reject
+        })
+    )
+    mockAgentModels.surface!.write = { kind: "config-option", optionId: "model" }
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByText("Agent GPT"))
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByRole("option", { name: /Agent Sonnet/ }))
+    const callsBeforeFirstFinished = mockAgentModels.select.mock.calls.length
+    await act(async () => {
+      rejectFirst(new Error("old selection failed"))
+      await waitForModelSelection(session.id)
+    })
+    expect(callsBeforeFirstFinished).toBe(1)
+    expect(mockAgentModels.select.mock.calls.map((args) => args[0])).toEqual([
+      "openai/agent-gpt",
+      "anthropic/agent-sonnet",
+    ])
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("Agent Sonnet")
+  })
+
+  it("reconciles when the saved row skips the intermediate optimistic choice", async () => {
+    mockAgentModels.surface!.write = { kind: "session-seed" }
+    const { rerender } = renderPicker(session)
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByText("Agent GPT"))
+    await act(async () => {
+      await waitForModelSelection(session.id)
+    })
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <TooltipProvider>
+          <ModelPicker
+            session={{
+              ...session,
+              updatedAt: 2,
+              externalAgentModels: {
+                "pi-1": { kind: "native", modelId: "anthropic/agent-sonnet" },
+              },
+            }}
+          />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("Agent Sonnet")
+  })
+
+  it("releases the send barrier on a lane switch and ignores late external persistence", async () => {
+    let finish!: () => void
+    mockAgentModels.select.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const { rerender } = renderPicker(session)
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByText("Agent GPT"))
+    mockAgentModels.agentId = null
+    mockAgentModels.surface = null
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <TooltipProvider>
+          <ModelPicker session={session} />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    await act(async () => {
+      await waitForModelSelection(session.id)
+    })
+    await act(async () => {
+      finish()
+      await Promise.resolve()
+    })
+    expect(mockedUpdateAgentModel).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it("accepts a new selection after the same Host configuration changes revision", async () => {
+    const runtime = useAgentRuntimeStore.getState()
+    const host = { kind: "host" as const, configId: "pi-1", revision: "r1", lifecycleGeneration: 1 }
+    runtime.setSessionRuntimeRef(session.id, host)
+    let finishOld!: () => void
+    mockAgentModels.select.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishOld = resolve
+        })
+    )
+    renderPicker(session)
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByRole("option", { name: /Agent GPT/ }))
+    act(() =>
+      runtime.setSessionRuntimeRef(session.id, { ...host, revision: "r2", lifecycleGeneration: 2 })
+    )
+    await act(async () => {
+      await waitForModelSelection(session.id)
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByRole("option", { name: /Agent Sonnet/ }))
+    await act(async () => {
+      await waitForModelSelection(session.id)
+      finishOld()
+      await Promise.resolve()
+    })
+    expect(mockedUpdateAgentModel).toHaveBeenCalledTimes(1)
+    expect(mockedUpdateAgentModel).toHaveBeenCalledWith(session.id, "pi-1", {
+      kind: "native",
+      modelId: "anthropic/agent-sonnet",
+    })
+    act(() => runtime.clearSessionRuntimeRef(session.id))
+  })
+
+  it("keeps an intentional selection saving when only the picker unmounts", async () => {
+    let finish!: () => void
+    mockAgentModels.select.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const { unmount } = renderPicker(session)
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    fireEvent.click(screen.getByText("Agent GPT"))
+    unmount()
+    await act(async () => {
+      finish()
+      await waitForModelSelection(session.id)
+    })
+    expect(mockedUpdateAgentModel).toHaveBeenCalledWith(session.id, "pi-1", {
+      kind: "native",
+      modelId: "openai/agent-gpt",
+    })
   })
 
   describe("Cognia models through the gateway", () => {
@@ -1830,9 +2056,7 @@ describe("an external agent's own models", () => {
       fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
       fireEvent.click(screen.getByText("Claude Opus 5"))
       await waitFor(() =>
-        expect(mockedUpdateSession).toHaveBeenCalledWith("ses_ext", {
-          externalAgentModels: { codex: { kind: "native" }, "pi-1": cognia },
-        })
+        expect(mockedUpdateAgentModel).toHaveBeenCalledWith("ses_ext", "pi-1", cognia)
       )
       expect(mockAgentModels.select).not.toHaveBeenCalled()
       // The chip names it straight away, with the route on hover.
@@ -1889,8 +2113,9 @@ describe("an external agent's own models", () => {
       expect(screen.getByText(/applied on the next message/i)).toBeInTheDocument()
       fireEvent.click(screen.getByText("Kimi K2"))
       await waitFor(() =>
-        expect(mockedUpdateSession).toHaveBeenCalledWith("ses_ext", {
-          externalAgentModels: { "pi-1": { kind: "native", modelId: "kimi-k2" } },
+        expect(mockedUpdateAgentModel).toHaveBeenCalledWith("ses_ext", "pi-1", {
+          kind: "native",
+          modelId: "kimi-k2",
         })
       )
       // Nothing live to write to: the next native turn applies it.
@@ -1906,9 +2131,7 @@ describe("an external agent's own models", () => {
       fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
       fireEvent.click(screen.getByText("Default model"))
       await waitFor(() =>
-        expect(mockedUpdateSession).toHaveBeenCalledWith("ses_ext", {
-          externalAgentModels: { "pi-1": { kind: "native" } },
-        })
+        expect(mockedUpdateAgentModel).toHaveBeenCalledWith("ses_ext", "pi-1", { kind: "native" })
       )
       expect(mockAgentModels.select).not.toHaveBeenCalled()
       expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent(
@@ -2097,4 +2320,31 @@ describe("an org member's shared Host (P6g)", () => {
       )
     ).toBeInTheDocument()
   })
+})
+
+it("names the Character's model and provider when the session inherits them", () => {
+  mockPickerCharacter = { model: "character-deepseek", providerId: "deepseek" } as never
+  try {
+    render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <TooltipProvider>
+          <ModelPicker
+            session={{
+              id: "character-model",
+              kind: "direct",
+              title: "Character",
+              createdAt: 0,
+              updatedAt: 0,
+              characterId: "character",
+            }}
+          />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent(
+      "character-deepseek"
+    )
+  } finally {
+    mockPickerCharacter = undefined
+  }
 })

@@ -29,7 +29,6 @@
 import { useRef } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
-import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { cn } from "@/lib/utils"
 import { ReferenceChips } from "../reference-chips"
 import { ReplyToChip } from "./reply-to-chip"
@@ -42,7 +41,6 @@ import { PreparingImagesChip } from "./preparing-images-chip"
 import { FailedCommandChips } from "./failed-command-chips"
 import { Collapse } from "./collapse"
 import { useOverflowFold } from "./use-overflow-fold"
-import { useStagedAttachments } from "./staged-attachment-store"
 import type { InputSegment } from "@/lib/slash-commands/parse-segments"
 import type { CommandError } from "@/lib/slash-commands/run-segments"
 import { Surface } from "@/components/surface/surface"
@@ -63,15 +61,9 @@ export type ContextChipBarProps = AttachmentPreviewProps & {
 
 export function ContextChipBar(props: ContextChipBarProps) {
   const t = useTranslations("chat.composer.context")
-  const staged = useStagedAttachments()
   const flowRef = useRef<HTMLDivElement>(null)
   const fold = useOverflowFold(flowRef)
 
-  // Real staged-blob bytes. The previous implementation summed
-  // `estimateDataUrlBytes(f.url)`, which only understands `data:` URLs — staged
-  // attachments carry `blob:` URLs, so the total was permanently 0 and this
-  // hint never rendered at all.
-  const totalBytes = staged.totalBytes
   const folded = fold.hiddenCount > 0 && !fold.expanded
 
   return (
@@ -112,11 +104,6 @@ export function ContextChipBar(props: ContextChipBarProps) {
           <ArtifactSelectionChips bare />
           <AttachmentPreview bare {...props} />
           <PreparingImagesChip count={props.preparingImageCount ?? 0} />
-          {totalBytes > 0 ? (
-            <span className="text-[11px] tabular-nums text-muted-foreground" aria-hidden>
-              {formatBytesCompact(totalBytes)}
-            </span>
-          ) : null}
         </div>
         {fold.hiddenCount > 0 ? (
           <Surface asChild layer="raised">

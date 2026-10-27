@@ -318,6 +318,30 @@ beforeEach(() => {
 })
 
 describe("MessageList", () => {
+  it("renders only the failed local copy of a refused Host enqueue placeholder", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const placeholder = {
+      ...userMsg("original", "Host placeholder"),
+      metadata: { hostState: { actionId: "a1" } },
+    }
+    const retained = {
+      ...userMsg("host-state-refused:a1", "Local refused text"),
+      metadata: {
+        hostState: {
+          actionId: "a1",
+          optimistic: true,
+          refusal: { code: "model_access_unavailable", at: 100, messageId: "original" },
+        },
+      },
+    }
+    render(
+      <Wrapper>
+        <MessageList messages={[placeholder, retained]} status="idle" />
+      </Wrapper>
+    )
+    expect(screen.getByText("Local refused text")).toBeVisible()
+    expect(screen.queryByText("Host placeholder")).not.toBeInTheDocument()
+  })
   it("retains message measurement keys after history is clipped or prepended", () => {
     const Wrapper = withAdapter(makeAdapter())
     const messages = Array.from({ length: 50 }, (_, i) => userMsg(`m${i}`, `question ${i}`))
@@ -1640,6 +1664,37 @@ describe("MessageList — timeline mount gating", () => {
       </Wrapper>
     )
     expect(timelineMock().mock.calls.at(-1)![0]).toMatchObject({ shortcutsEnabled: false })
+  })
+
+  it("connects the rail to its own focusable message viewport in split panes", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={manyMsgs(TIMELINE_THRESHOLD + 1)}
+          status="idle"
+          paneSessionId="one"
+        />
+        <MessageList
+          messages={manyMsgs(TIMELINE_THRESHOLD + 1)}
+          status="idle"
+          paneSessionId="two"
+        />
+      </Wrapper>
+    )
+    const logs = screen.getAllByRole("log")
+    expect(logs).toHaveLength(2)
+    const ids = logs.map((log) => log.id)
+    expect(ids.every(Boolean)).toBe(true)
+    expect(new Set(ids).size).toBe(2)
+    for (const log of logs) {
+      expect(log).toHaveClass("conversation-scroll")
+      expect(log).toHaveAttribute("tabindex", "0")
+      expect(timelineMock().mock.calls.some(([props]) => props.scrollTargetId === log.id)).toBe(
+        true
+      )
+      expect(log.closest("[data-chat-scroll-surface]")).not.toBeNull()
+    }
   })
 })
 

@@ -59,7 +59,7 @@ import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import type { MessageDisplayPreferences } from "@/types/appearance"
 import type { Character } from "@cognia/agent-config-types"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { cn } from "@/lib/utils"
@@ -67,6 +67,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { PerfBoundary } from "@/lib/perf"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import { transcriptHasMultipleAgents } from "@/lib/chat/transcript-agents"
+import { withoutRefusedHostPlaceholders } from "@/lib/chat/refused-host-message"
 import { TranscriptAgentsProvider } from "@/components/chat/transcript-agents-context"
 
 // Lists at or below this length render in normal document flow (no
@@ -121,7 +122,7 @@ interface Props {
 }
 
 export function MessageList({
-  messages,
+  messages: inputMessages,
   status,
   paneSessionId,
   directCharacter,
@@ -132,6 +133,7 @@ export function MessageList({
   projectRoot,
   messageDisplayOverride,
 }: Props) {
+  const messages = useMemo(() => withoutRefusedHostPlaceholders(inputMessages), [inputMessages])
   const lastIndex = messages.length - 1
   const sessionId = useChatStore((s) => s.activeSessionId)
   // The conversation a selection here belongs to. Prefer the messages' own
@@ -160,6 +162,8 @@ export function MessageList({
   const tActions = useTranslations("mobile.messageActions")
   const tJump = useTranslations("chat.jump")
   const tSelect = useTranslations("chat.transcriptSelection")
+  const tTimeline = useTranslations("chat.timeline")
+  const scrollTargetId = useId()
   // Long-press opens the action sheet on mobile, but there's no hover hint to
   // advertise it. Surface a one-line nudge early in the conversation; it
   // self-retires once the thread grows past a couple of messages, so it never
@@ -784,15 +788,18 @@ export function MessageList({
             <span>{tActions("longPressHint")}</span>
           </div>
         ) : null}
-        <div className="relative flex flex-1 overflow-hidden">
+        <div className="relative flex flex-1 overflow-hidden" data-chat-scroll-surface>
           {/* The message lane. The timeline rail is a sibling of THIS, not of
               the scroller, so the jump pill centres over the reading column
               rather than over the column plus a 256px expanded panel. */}
-          <div className="relative flex min-w-0 flex-1">
+          <div className="relative flex min-w-0 flex-1" data-chat-message-lane>
             <div
               ref={scrollParentRef}
-              className="relative flex-1 overflow-y-auto overscroll-contain"
+              id={scrollTargetId}
+              className="conversation-scroll relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
               role="log"
+              aria-label={tTimeline("scrollConversation")}
+              tabIndex={0}
               onScroll={handleScroll}
             >
               <div
@@ -948,6 +955,7 @@ export function MessageList({
             <ConversationTimeline
               messages={timelineMessages}
               scrollRef={scrollParentRef}
+              scrollTargetId={scrollTargetId}
               virtualizer={rowVirtualizer}
               virtualize={virtualize}
               getTailSize={getTailSize}

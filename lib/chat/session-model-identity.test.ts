@@ -35,15 +35,17 @@ describe("sessionAgentLane", () => {
    * A conversation started on the desktop recorded no lane on the phone. Its
    * synced agent link says more about it than the phone's default.
    */
-  it("prefers the conversation's synced agent link over this device's default", () => {
+  it("keeps retained links and legacy markers from overriding the next-turn runtime", () => {
     expect(
       sessionAgentLane(session({ externalAgentSession: { agentId: "kimi", sessionId: "x" } }), {
         defaultRuntimeRef: { kind: "builtin" },
       })
-    ).toEqual({ agentId: "kimi" })
+    ).toBeNull()
     expect(
-      sessionAgentLane(session({ providerOverride: externalAgentProviderId("kimi") }), {})
-    ).toEqual({ agentId: "kimi" })
+      sessionAgentLane(session({ providerOverride: externalAgentProviderId("kimi") }), {
+        defaultRuntimeRef: { kind: "external", agentId: "codex" },
+      })
+    ).toEqual({ agentId: "codex" })
   })
 
   it("falls back to what the next turn would run on, like the composer chip", () => {
@@ -63,6 +65,16 @@ describe("sessionAgentLane", () => {
 })
 
 describe("resolveSessionModelIdentity + sessionModelLabels", () => {
+  it("does not display an external Agent's old app default on the builtin lane", () => {
+    expect(
+      resolveSessionModelIdentity(session(), {
+        defaultRuntimeRef: { kind: "builtin" },
+        defaultProvider: externalAgentProviderId("kimi"),
+        defaultModel: "kimi-native-model",
+      })
+    ).toEqual({ lane: "builtin", modelId: ANTHROPIC_DEFAULT_MODEL, providerId: "anthropic" })
+  })
+
   it("keeps the built-in chain: conversation, then agent, then profile", () => {
     const character = { model: "gpt-5.6", providerId: "openai" } as Character
     expect(resolveSessionModelIdentity(session(), { character })).toEqual({
@@ -109,7 +121,11 @@ describe("resolveSessionModelIdentity + sessionModelLabels", () => {
   it("names the agent, not the built-in default, for an agent on its own model", () => {
     const identity = resolveSessionModelIdentity(
       session({ externalAgentSession: { agentId: "kimi", sessionId: "native-1" } }),
-      { defaultModel: "claude-sonnet-5", agentNameOf: names }
+      {
+        sessionRuntimeRef: { kind: "external", agentId: "kimi" },
+        defaultModel: "claude-sonnet-5",
+        agentNameOf: names,
+      }
     )
     expect(identity).toEqual({ lane: "agent", agentId: "kimi", agentName: "Kimi Code" })
     expect(sessionModelLabels(identity)).toEqual({ model: "Kimi Code", provider: "Kimi Code" })

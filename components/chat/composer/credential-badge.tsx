@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * "No API key" — the one credential state that stops the next send.
+ * Credential and gateway warnings for the conversation's selected route.
  *
  * It sat in the chat header; with the header projected into the title bar a
  * red badge there read as window chrome shouting. The composer's status line
@@ -25,8 +25,23 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { COMPOSER_TOOLBAR_CHIP, COMPOSER_TOOLBAR_GLYPH } from "@/lib/chat/composer-skin"
 import { cn } from "@/lib/utils"
+import type { ChatSession } from "@cognia/agent-config-types"
+import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { useSettingsStore } from "@/stores/settings"
+import { useCogniaGatewayModels } from "@/hooks/agent/use-cognia-gateway-models"
+import { usePersonAgents } from "@/hooks/chat/use-person-agents"
+import {
+  resolveExternalAgentModelSelection,
+  isExternalAgentProviderId,
+} from "@/lib/ai/agent/external/session/session-models"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
+import { credentialsRequiredByImport } from "@/lib/ai/agent/external/lifecycle/credentials"
+import { useCharacter } from "@/lib/data-hooks/context"
+import { resolveAccountId } from "@/lib/claude/env-resolver"
 
 interface Props {
+  session?: ChatSession | null
   onOpenSettings?: () => void
   /** Key glyph only — the toolbar's fold ladder sets it on a narrow row. */
   glyph?: boolean
@@ -44,11 +59,85 @@ interface Props {
 const DESTRUCTIVE_TINT =
   "shrink-0 border border-destructive/30 bg-destructive/10 text-destructive hover:border-destructive/40 hover:bg-destructive/20 hover:text-destructive dark:border-destructive/30 dark:bg-destructive/15 dark:hover:bg-destructive/25"
 
-export function ComposerCredentialBadge({ onOpenSettings, glyph = false, className }: Props) {
+export function ComposerCredentialBadge({
+  session,
+  onOpenSettings,
+  glyph = false,
+  className,
+}: Props) {
   const t = useTranslations("chat.header")
-  const { keyOk } = useCredentialStatus()
-  if (keyOk !== false) return null
-  const label = t("noApiKey")
+  const runtime = useRuntimeRefForSession(session?.id)
+  const agentId =
+    runtime.kind === "external"
+      ? runtime.agentId
+      : runtime.kind === "host"
+        ? runtime.configId
+        : null
+  const config = useExternalAgentStore((state) =>
+    runtime.kind === "external" && agentId ? state.agents[agentId] : undefined
+  )
+  const settings = useSettingsStore((state) => state.settings)
+  const character = useCharacter(session?.characterId)
+  const gateway = useCogniaGatewayModels(session?.id)
+  const personAgents = usePersonAgents().agents
+  const selection = agentId
+    ? resolveExternalAgentModelSelection({
+        agentId,
+        session,
+        ...(runtime.kind === "external" && config
+          ? { agentDefault: config.cogniaModel ?? null }
+          : {}),
+        appDefaults: settings,
+      })
+    : null
+  const binding = selection?.cogniaModel
+  const providerId = agentId
+    ? (binding?.providerId ?? null)
+    : ((isExternalAgentProviderId(session?.providerOverride)
+        ? undefined
+        : session?.providerOverride) ??
+      character?.providerId ??
+      resolveAppDefaultModel(settings).provider ??
+      "anthropic")
+  const hostOwned = runtime.kind === "host" || personAgents !== null
+  const { keyOk } = useCredentialStatus({
+    providerId:
+      hostOwned || (!agentId && session?.characterId && character === undefined)
+        ? null
+        : providerId,
+    accountId: binding
+      ? binding.accountId
+      : providerId
+        ? resolveAccountId(providerId, session, character, settings)
+        : undefined,
+    gateway: Boolean(binding),
+  })
+  const nativeCredentialsMissing = Boolean(
+    agentId && !binding && config && credentialsRequiredByImport(config).length > 0
+  )
+  const offered = binding
+    ? gateway.providers.find((entry) => entry.providerId === binding.providerId)
+    : undefined
+  const gatewayUnavailable = Boolean(
+    binding &&
+    (gateway.status === "unavailable" ||
+      (gateway.status === "ready" &&
+        !offered?.models.some((model) => model.id === binding.modelId)))
+  )
+  const hostAccountMissing = Boolean(
+    binding?.accountId && offered?.accountIds && !offered.accountIds.includes(binding.accountId)
+  )
+  const labelKey = nativeCredentialsMissing
+    ? "externalCredentialsRequired"
+    : gatewayUnavailable
+      ? "gatewayUnavailable"
+      : keyOk === false || hostAccountMissing
+        ? "noApiKey"
+        : null
+  if (!labelKey) return null
+  const label = t(labelKey)
+  // Native Agent credentials belong in its configuration, not provider settings.
+  const openSettings = nativeCredentialsMissing ? undefined : onOpenSettings
   const classes = cn(
     COMPOSER_TOOLBAR_CHIP,
     "gap-1",
@@ -62,13 +151,13 @@ export function ComposerCredentialBadge({ onOpenSettings, glyph = false, classNa
       {glyph ? null : <span>{label}</span>}
     </>
   )
-  const chip = onOpenSettings ? (
+  const chip = openSettings ? (
     <Button
       type="button"
       variant="ghost"
       size="sm"
       className={classes}
-      onClick={onOpenSettings}
+      onClick={openSettings}
       aria-label={glyph ? label : undefined}
       data-testid="composer-credential-badge"
       data-glyph={glyph || undefined}

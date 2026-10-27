@@ -10,9 +10,9 @@ import type { TimelineTurn } from "./use-timeline-turns"
 export interface TimelineGeometry {
   /** Start position of each turn, same order as the input turns. */
   positions: number[]
-  /** Top of the viewport as a fraction of total scroll height. */
+  /** Top of the viewport as a fraction of actual DOM scroll height. */
   viewportTop: number
-  /** Viewport height as a fraction of total scroll height. */
+  /** Viewport height as a fraction of actual DOM scroll height. */
   viewportHeight: number
   /** Index (into turns) of the turn currently near the viewport top; -1 if none. */
   activeIndex: number
@@ -47,10 +47,13 @@ export function computeTimelineGeometry(params: {
   scrollTop: number
   clientHeight: number
   total: number
+  /** Actual scroll extent, including padding outside the virtual rows. */
+  viewportTotal?: number
   starts: number[]
   positions?: number[]
 }): TimelineGeometry {
   const { scrollTop, clientHeight, total, starts } = params
+  const viewportTotal = params.viewportTotal ?? total
   const positions = params.positions ?? computeTurnPositions(starts, total)
   if (total <= 0) {
     return {
@@ -63,8 +66,8 @@ export function computeTimelineGeometry(params: {
   const probe = scrollTop + Math.min(clientHeight * 0.3, 120)
   return {
     positions,
-    viewportTop: clamp01(scrollTop / total),
-    viewportHeight: clamp01(clientHeight / total),
+    viewportTop: viewportTotal > 0 ? clamp01(scrollTop / viewportTotal) : 0,
+    viewportHeight: viewportTotal > 0 ? clamp01(clientHeight / viewportTotal) : 1,
     activeIndex: findActiveIndex(starts, probe),
   }
 }
@@ -175,6 +178,7 @@ export function useTimelineScrollSync({
         scrollTop: el.scrollTop,
         clientHeight: el.clientHeight,
         total,
+        viewportTotal: el.scrollHeight,
         starts: startsRef.current,
         positions: positionsRef.current,
       })

@@ -439,13 +439,10 @@ function SortableChip({
             isDocument ? "bg-card shadow-xs hover:border-foreground/20" : "bg-muted/40",
             state?.status === "rejected" && "border-destructive/60 bg-destructive/5"
           )}
-          // One row height for every tile. Media is a landscape thumb (112×80,
-          // smaller than the grid's square); a document is a wider card so its
-          // name, size and cost read on their own lines instead of being
-          // stacked into a thumbnail's footprint. Inline style wins over the
-          // variant's `size-24`.
+          // Documents share the compact context-card height; media keeps its
+          // landscape thumbnail. Inline style overrides the grid's `size-24`.
           style={
-            isDocument ? { width: "13.5rem", height: "5rem" } : { width: "7rem", height: "5rem" }
+            isDocument ? { width: "13.5rem", height: "3.5rem" } : { width: "7rem", height: "5rem" }
           }
           data-testid="composer-attachment-chip"
         >
@@ -488,7 +485,7 @@ function SortableChip({
             label={t("removeAria", { filename: displayName })}
             // Visible without hover, like the old chips: touch devices have no
             // hover to reveal an opacity-0 button with.
-            className="top-1.5 right-1.5 size-5 bg-background/90 opacity-80 shadow-xs ring-1 ring-border/60 transition-opacity hover:opacity-100 [&>svg]:size-2.5"
+            className="top-1 right-1 size-5 bg-background/90 opacity-80 shadow-xs ring-1 ring-border/60 transition-opacity hover:opacity-100 [&>svg]:size-2.5"
           />
         </Attachment>
       </div>
@@ -595,16 +592,17 @@ function FileTileContent({
   const stem = ext ? name.slice(0, name.length - ext.length - 1) : name
   const Fallback = FILE_TILE_ICONS[category] ?? PaperclipIcon
   return (
-    <span className="flex size-full items-center gap-2.5 pr-8 pl-2.5">
+    <span className="flex size-full items-center gap-1.5 pr-7 pl-1.5">
       <FileTypeBadge
         path={name}
+        className="size-9"
         icon={
           category === "source" ? (
             <Fallback className="size-[18px] text-muted-foreground" />
           ) : undefined
         }
       />
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-baseline text-xs leading-snug font-medium">
           <span className="truncate">{stem}</span>
           {ext ? <span className="shrink-0 font-normal text-muted-foreground">.{ext}</span> : null}

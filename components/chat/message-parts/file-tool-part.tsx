@@ -21,6 +21,7 @@
 
 import { memo, useMemo, useState } from "react"
 import type { ToolUIPart } from "ai"
+import type { SharedDiffStats } from "@/lib/collab/shared-assistant-projection"
 import { useTranslations } from "next-intl"
 import { ExternalLinkIcon, LinkIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -135,6 +136,8 @@ export function describeFileToolTarget(part: ToolUIPart, kind: FileToolKind): Fi
       const paths = applyPatchFiles(input)
         .map(patchFilePath)
         .filter((p): p is string => Boolean(p))
+      // A shared run's summary card carries the paths without the patch.
+      if (paths.length === 0) paths.push(...sharedPaths(input))
       if (paths.length === 1) return { target: paths[0], path: paths[0] }
       return { target: paths.length > 0 ? paths.join(", ") : undefined }
     }
@@ -162,6 +165,27 @@ export function describeFileToolTarget(part: ToolUIPart, kind: FileToolKind): Fi
   }
 }
 
+/**
+ * The diff a shared run's summary card carries in place of the edit itself
+ * (ADR-0241): members see how much changed, not what.
+ */
+function sharedDiffStats(input: Record<string, unknown>): SharedDiffStats | undefined {
+  const stats = input.sharedDiffStats as Partial<SharedDiffStats> | undefined
+  if (!stats || typeof stats.added !== "number" || typeof stats.removed !== "number")
+    return undefined
+  return {
+    added: stats.added,
+    removed: stats.removed,
+    ...(typeof stats.files === "number" ? { files: stats.files } : {}),
+  }
+}
+
+function sharedPaths(input: Record<string, unknown>): string[] {
+  return Array.isArray(input.paths)
+    ? input.paths.filter((path): path is string => typeof path === "string")
+    : []
+}
+
 /** Result meta chip text for a settled call (line/match/edit counts). */
 function fileToolResultMeta(
   part: ToolUIPart,
@@ -173,6 +197,13 @@ function fileToolResultMeta(
   const parsed = parseOutputJson(output) as Record<string, unknown> | null
   const outputLines = (text: unknown): number =>
     typeof text === "string" && text ? text.split(/\r?\n/).filter(Boolean).length : 0
+
+  const shared = sharedDiffStats(input)
+  if (shared && (kind === "edit" || kind === "patch" || kind === "write")) {
+    if (kind === "write") return t("result.lines", { count: shared.added })
+    const diff = t("result.diff", { added: shared.added, removed: shared.removed })
+    return shared.files ? `${t("result.files", { count: shared.files })} · ${diff}` : diff
+  }
 
   switch (kind) {
     case "read": {

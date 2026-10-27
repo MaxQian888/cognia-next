@@ -169,6 +169,24 @@ describe("plugin session store reasoning updates", () => {
     })
   })
 
+  it("drops dotted session keys before the database writer", async () => {
+    await useSessionStore.getState().updateSession("session-1", {
+      title: "Renamed",
+      "workingSet.entries.0": { id: "injected" },
+      "executionContext.permissions.mode": "allow",
+      "metadata.automatedTurn": undefined,
+    } as Parameters<ReturnType<typeof useSessionStore.getState>["updateSession"]>[1])
+
+    expect(updateSessionMock).toHaveBeenCalledWith("session-1", { title: "Renamed" })
+    expect(Object.keys(useSessionStore.getState().sessions[0])).toEqual(
+      expect.not.arrayContaining([
+        "workingSet.entries.0",
+        "executionContext.permissions.mode",
+        "metadata.automatedTurn",
+      ])
+    )
+  })
+
   /**
    * The in-memory row moving is not evidence the tier was saved. A caller that
    * tells the user "set to Assault" needs the Dexie failure, not a promise that

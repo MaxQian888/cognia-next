@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, memo, useCallback, useRef, useEffect, useMemo } from "react"
+import { createPortal } from "react-dom"
 import { useTranslations } from "next-intl"
 import { Code2, Expand, ListOrdered, WrapText } from "lucide-react"
 import { AnimatedActionIcon, CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
@@ -74,6 +75,10 @@ export interface CodeBlockProps {
   capHeight?: boolean
   /** Extra header actions (the chat renderer's "create artifact"). */
   extraActions?: React.ReactNode
+  /** A document host owns the frame, download and fullscreen affordances. */
+  presentation?: "block" | "document"
+  /** Place document controls in the host's toolbar instead of repeating a header. */
+  toolbarContainer?: HTMLElement | null
 }
 
 /**
@@ -110,6 +115,8 @@ export const CodeBlock = memo(function CodeBlock({
   theme = CHAT_CODE_THEME,
   capHeight = false,
   extraActions,
+  presentation = "block",
+  toolbarContainer,
 }: CodeBlockProps) {
   const t = useTranslations("chat.renderers.code")
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -228,6 +235,7 @@ export const CodeBlock = memo(function CodeBlock({
 
   const hasHighlighting = Boolean(highlightedHtml && darkHighlightedHtml)
   const langLabel = language || t("plainText")
+  const documentView = presentation === "document"
 
   const renderCode = useCallback(
     (inFullscreen = false) => {
@@ -246,7 +254,7 @@ export const CodeBlock = memo(function CodeBlock({
           <div
             className={cn(
               "code-scroll-x overflow-x-auto",
-              CODE_SURFACE,
+              documentView && !inFullscreen ? "bg-transparent" : CODE_SURFACE,
               compact ? "text-xs" : "text-sm",
               compact ? "[&_pre]:p-2.5" : "[&_pre]:p-4",
               "[&_pre]:m-0 [&_pre]:bg-transparent!",
@@ -281,7 +289,7 @@ export const CodeBlock = memo(function CodeBlock({
           ref={inFullscreen ? undefined : codeRef}
           className={cn(
             "code-scroll-x overflow-x-auto font-mono",
-            CODE_SURFACE,
+            documentView && !inFullscreen ? "bg-transparent" : CODE_SURFACE,
             compact ? "p-2.5 text-xs" : "p-4 text-sm",
             wordWrap && "whitespace-pre-wrap wrap-break-word"
           )}
@@ -347,6 +355,7 @@ export const CodeBlock = memo(function CodeBlock({
       compact,
       startLineNumber,
       t,
+      documentView,
     ]
   )
 
@@ -406,22 +415,26 @@ export const CodeBlock = memo(function CodeBlock({
       >
         <CopyFeedbackIcon copied={copied} size={compact ? 10 : 12} />
       </RichBlockAction>
-      <RichBlockAction
-        compact={compact}
-        onClick={handleDownload}
-        label={t("downloadAria")}
-        tooltip={t("download")}
-      >
-        <AnimatedActionIcon icon={AnimatedDownloadIcon} size={compact ? 10 : 12} />
-      </RichBlockAction>
-      <RichBlockAction
-        compact={compact}
-        onClick={() => setIsFullscreen(true)}
-        label={t("fullscreenAria")}
-        tooltip={t("fullscreen")}
-      >
-        <Expand />
-      </RichBlockAction>
+      {!documentView ? (
+        <RichBlockAction
+          compact={compact}
+          onClick={handleDownload}
+          label={t("downloadAria")}
+          tooltip={t("download")}
+        >
+          <AnimatedActionIcon icon={AnimatedDownloadIcon} size={compact ? 10 : 12} />
+        </RichBlockAction>
+      ) : null}
+      {!documentView ? (
+        <RichBlockAction
+          compact={compact}
+          onClick={() => setIsFullscreen(true)}
+          label={t("fullscreenAria")}
+          tooltip={t("fullscreen")}
+        >
+          <Expand />
+        </RichBlockAction>
+      ) : null}
     </>
   )
 
@@ -433,6 +446,16 @@ export const CodeBlock = memo(function CodeBlock({
     </span>
   )
   const headerMeta = headerTitle ? (language ? `· ${language}` : null) : filename || null
+
+  if (documentView) {
+    return (
+      <div className={className}>
+        {toolbarContainer ? createPortal(actions, toolbarContainer) : null}
+        {renderCode(false)}
+        {truncationFooter}
+      </div>
+    )
+  }
 
   return (
     <>

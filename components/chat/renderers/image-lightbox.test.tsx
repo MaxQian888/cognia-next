@@ -113,6 +113,44 @@ function FocusHarness() {
 }
 
 describe("ImageLightbox", () => {
+  it("cancels a queued thumbnail scroll when the preview closes before the next frame", () => {
+    const frame = jest.spyOn(window, "requestAnimationFrame").mockReturnValue(42)
+    const cancel = jest.spyOn(window, "cancelAnimationFrame")
+    try {
+      render(
+        <TooltipProvider>
+          <FocusHarness />
+        </TooltipProvider>
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Open preview" }))
+      expect(frame).toHaveBeenCalled()
+      fireEvent.click(screen.getByRole("button", { name: "Close" }))
+      expect(screen.queryByRole("dialog")).toBeNull()
+      expect(cancel).toHaveBeenCalledWith(42)
+    } finally {
+      frame.mockRestore()
+      cancel.mockRestore()
+    }
+  })
+  it("keeps the active thumbnail in view after keyboard navigation", async () => {
+    const original = HTMLElement.prototype.scrollIntoView
+    const scroll = jest.fn()
+    HTMLElement.prototype.scrollIntoView = scroll
+    try {
+      renderGallery()
+      await waitFor(() =>
+        expect(scroll).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" })
+      )
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" })
+      await waitFor(() =>
+        expect(scroll.mock.contexts.at(-1)).toBe(
+          screen.getByRole("button", { name: "View two.png" })
+        )
+      )
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
   beforeEach(() => {
     mockDownloadFromUrl.mockClear()
     mockDownloadFromUrl.mockResolvedValue({ kind: "downloaded" })

@@ -60,6 +60,20 @@ describe("computeTimelineGeometry", () => {
     expect(g.activeIndex).toBe(2)
   })
 
+  it("uses actual padded scroll height for the viewport while retaining virtual marker positions", () => {
+    const g = computeTimelineGeometry({
+      scrollTop: 840,
+      clientHeight: 200,
+      total: 1000,
+      viewportTotal: 1040,
+      starts: [0, 500],
+    })
+    expect(g.positions).toEqual([0, 0.5])
+    expect(g.viewportTop).toBeCloseTo(840 / 1040)
+    expect(g.viewportHeight).toBeCloseTo(200 / 1040)
+    expect(g.viewportTop + g.viewportHeight).toBeCloseTo(1)
+  })
+
   it("clamps fractions into [0,1]", () => {
     const g = computeTimelineGeometry({
       scrollTop: -50,
@@ -130,6 +144,7 @@ describe("useTimelineScrollSync — virtualized scroll updates", () => {
     const container = document.createElement("div")
     Object.defineProperties(container, {
       clientHeight: { value: 100, configurable: true },
+      scrollHeight: { value: 1000, configurable: true },
       scrollTop: { value: 0, writable: true, configurable: true },
     })
     const virtualizer = {

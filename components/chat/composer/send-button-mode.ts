@@ -38,6 +38,8 @@ export interface SendButtonInput {
   isPreparingAttachments: boolean
   /** Trimmed text is non-empty, or at least one attachment is staged. */
   hasContent: boolean
+  /** The last turn can continue through the session's existing send route. */
+  canResume?: boolean
   /**
    * A platform conversation has drafted replies waiting for review. With an
    * empty box the button offers to review them; typing takes it back.
@@ -56,7 +58,7 @@ export interface SendButtonInput {
  * - `send` — submits a new turn.
  * - `stop` — interrupts the running turn.
  */
-export type SendButtonMode = "draft" | "busy" | "send" | "stop"
+export type SendButtonMode = "draft" | "busy" | "send" | "stop" | "resume"
 
 /**
  * The secondary control offered beside Stop during a live turn: it sends what
@@ -134,6 +136,15 @@ export function resolveSendButton(input: SendButtonInput): SendButtonState {
 
   if (hasPendingDrafts && !hasContent) {
     return { mode: "draft", disabled: false, variant: "secondary", followUp: null }
+  }
+
+  if (input.canResume && !hasContent) {
+    return {
+      mode: "resume",
+      disabled: composerDisabled || outboundBlocked,
+      variant: "default",
+      followUp: null,
+    }
   }
 
   return { mode: "send", disabled: !canSend, variant: "default", followUp: null }

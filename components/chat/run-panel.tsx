@@ -118,6 +118,9 @@ import {
   tokensPerSecond,
 } from "@/types/system/usage"
 import { TodoList } from "./todo-list"
+import { useConversationActivity } from "@/hooks/connectors/use-conversation-activity"
+import { useConversationAssignmentEvents } from "@/hooks/connectors/use-conversation-assignment-events"
+import { ConversationActivityNotice } from "@/components/inbox/conversation-activity-log"
 import { ToolCallRow } from "./message-parts/tool-call-row"
 import { SubagentTree } from "./message-parts/subagent-tree"
 
@@ -126,6 +129,8 @@ const PANEL_BODY_ID = "run-panel-body"
 export interface RunStatusBarProps {
   /** Session this panel reports on (the bound pane's id). */
   sessionId: string | null
+  /** Audit history is disclosed here instead of occupying the transcript. */
+  conversationKey?: string
   /** Interrupt and immediately replay the queued steer ("Send now"). */
   onSteerNow?: () => Promise<void> | void
   /** Replay the queued steer now with no turn boundary (errored/idle queue). */
@@ -515,9 +520,19 @@ function Dot() {
   )
 }
 
-function RunPanelImpl({ sessionId, onSteerNow, onSteerFlush, className }: RunStatusBarProps) {
+function RunPanelImpl({
+  sessionId,
+  conversationKey,
+  onSteerNow,
+  onSteerFlush,
+  className,
+}: RunStatusBarProps) {
   const t = useTranslations("chat.runStatus")
   const tp = useTranslations("chat.runPanel")
+  const ta = useTranslations("inbox.activity")
+  const auditEntries = useConversationActivity(conversationKey)
+  const assignmentEvents = useConversationAssignmentEvents(conversationKey)
+  const activityCount = auditEntries.length + assignmentEvents.length
   const status = useSessionStatus(sessionId)
   const timing = useSessionRunTiming(sessionId)
   const steerQueue = useSessionSteerQueue(sessionId)
@@ -606,11 +621,11 @@ function RunPanelImpl({ sessionId, onSteerNow, onSteerFlush, className }: RunSta
     record.tools.length > 0 || record.todos.length > 0 || record.subagentParts.length > 0
   // The queue is a section of the expanded body, so a queue alone is enough to
   // make the panel expandable — a turn can have follow-ups before its first tool.
-  const expandable = hasWork || queueDepth > 0
+  const expandable = hasWork || queueDepth > 0 || activityCount > 0
   const replay = !busy && steerQueue.length === 0 && hasWork
 
   // Nothing live, nothing queued, and no replayable record → render nothing.
-  if (!busy && steerQueue.length === 0 && !replay) return null
+  if (!busy && steerQueue.length === 0 && !replay && activityCount === 0) return null
 
   const elapsedMs = activeElapsedMs(timing, toRunStatus(status), now) ?? (busy ? null : lastTurnMs)
   const elapsed = elapsedMs != null ? formatRunElapsed(elapsedMs) : null
@@ -688,6 +703,10 @@ function RunPanelImpl({ sessionId, onSteerNow, onSteerFlush, className }: RunSta
           : tp("summaryTools", { count: record.counts.tools })}
       </span>
     </>
+  ) : activityCount > 0 ? (
+    <span className="truncate text-muted-foreground">
+      {ta("title")} · {ta("count", { count: activityCount })}
+    </span>
   ) : null
 
   return (
@@ -871,6 +890,13 @@ function RunPanelImpl({ sessionId, onSteerNow, onSteerFlush, className }: RunSta
               <SectionHeading>{tp("sectionSubagents")}</SectionHeading>
               <SubagentTree parts={record.subagentParts as never} mode="standard" />
             </section>
+          )}
+
+          {activityCount > 0 && (
+            <ConversationActivityNotice
+              auditEntries={auditEntries}
+              assignmentEvents={assignmentEvents}
+            />
           )}
 
           {hasWork && (

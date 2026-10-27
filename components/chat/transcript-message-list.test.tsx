@@ -72,6 +72,15 @@ function message(id: string, role: UIMessage["role"], text: string): UIMessage {
 }
 
 describe("<TranscriptMessageList />", () => {
+  it("retains a styled, focusable native scroll surface without a timeline", () => {
+    render(<TranscriptMessageList sessionId="s" messages={[]} status="idle" />)
+    const log = screen.getByRole("log")
+    expect(log).toHaveClass("conversation-scroll")
+    expect(log).toHaveAttribute("tabindex", "0")
+    expect(log).toHaveAccessibleName()
+    expect(screen.queryByRole("scrollbar")).not.toBeInTheDocument()
+  })
+
   it.each(["streaming", "awaiting_approval"] as const)(
     "keeps a growing tail in document flow during %s",
     (status) => {

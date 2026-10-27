@@ -26,6 +26,21 @@ function input(overrides: Partial<SendButtonInput> = {}): SendButtonInput {
 }
 
 describe("resolveSendButton — idle", () => {
+  it("offers Resume for an interrupted turn with an empty composer", () => {
+    expect(resolveSendButton(input({ canResume: true }))).toMatchObject({
+      mode: "resume",
+      disabled: false,
+    })
+  })
+
+  it("sends typed content instead of resuming and respects outbound blocks", () => {
+    expect(resolveSendButton(input({ canResume: true, hasContent: true })).mode).toBe("send")
+    expect(resolveSendButton(input({ canResume: true, composerDisabled: true })).disabled).toBe(
+      true
+    )
+    expect(resolveSendButton(input({ canResume: true, outboundBlocked: true })).disabled).toBe(true)
+  })
+
   it("is a disabled Send with an empty box", () => {
     expect(resolveSendButton(input())).toEqual({
       mode: "send",

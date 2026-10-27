@@ -46,6 +46,7 @@ import { withReplyContextLines } from "@/lib/chat/reply-to"
 import { invalidateTranscriptRuntime } from "@/lib/chat/transcript/revision-events"
 import { sessionControl } from "@/lib/claude/ipc"
 import type { RuntimeSessionStatus } from "@cognia/agent-config-types"
+import { renderBranchSeed } from "@/lib/chat/branch-session"
 
 /** Rehydrate a replaced AI-SDK session from surviving canonical message parts. */
 export async function buildAiSdkInitialConversation(
@@ -88,6 +89,44 @@ export async function prepareTranscriptRuntimeSend(
     "ai-sdk"
   let prepared = options
   let lostRetainedContext = false
+  if (!usesAiSdk && !preparation.skipHydration && session?.runtimeTranscriptInvalidated) {
+    // Native SDK resume identities retain opaque pre-edit history. Start a
+    // fresh query with the surviving, gated text transcript instead.
+    const canonical = await listMessages(sessionId)
+    assertDatabaseCurrent()
+    const visible = selectVisibleMessages(
+      canonical,
+      preparation.activeBranchByGroup ?? session.activeBranchByGroup ?? {}
+    )
+    const currentId =
+      preparation.currentMessageId === undefined ? options.turnId : preparation.currentMessageId
+    if (
+      (
+        canonical.find((message) => message.id === currentId)?.metadata as
+          { deletedAt?: unknown } | undefined
+      )?.deletedAt !== undefined
+    ) {
+      throw new Error("inbound_message_recalled")
+    }
+    const currentIndex = visible.findIndex((message) => message.id === currentId)
+    const history = currentIndex < 0 ? visible : visible.slice(0, currentIndex)
+    const gated = gateWorkbenchProviderPayload({ content: "", messages: history, sendOptions: {} })
+    const seed = renderBranchSeed(gated.messages).content
+    await updateSession(sessionId, { sdkSessionId: undefined, forkedFromSdkSessionId: undefined })
+    assertDatabaseCurrent()
+    prepared = {
+      ...options,
+      resumeSessionId: undefined,
+      forkFromSessionId: undefined,
+      initialConversation: undefined,
+      appendSystemPrompt: [
+        options.appendSystemPrompt,
+        seed ? `[Conversation history]\n\n${seed}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    }
+  }
   if (
     usesAiSdk &&
     !preparation.skipHydration &&
@@ -140,6 +179,16 @@ export async function prepareTranscriptRuntimeSend(
     ) {
       const canonical = await listMessages(sessionId)
       assertDatabaseCurrent()
+      const currentId =
+        preparation.currentMessageId === undefined ? options.turnId : preparation.currentMessageId
+      if (
+        (
+          canonical.find((message) => message.id === currentId)?.metadata as
+            { deletedAt?: unknown } | undefined
+        )?.deletedAt !== undefined
+      ) {
+        throw new Error("inbound_message_recalled")
+      }
       const visible = withReplyContextLines(
         selectVisibleMessages(
           canonical,

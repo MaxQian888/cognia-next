@@ -96,6 +96,13 @@ it("reads and writes session status and diagnostics through the chat store", () 
   expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith("room-1", { code: "x" })
 })
 
+it("preserves an explicit room interruption instead of reporting normal completion", () => {
+  createStoreRoomSinks().status.set("room-1", "idle", { turnOutcome: "interrupted" })
+  expect(chatState.setSessionStatus).toHaveBeenCalledWith("room-1", "idle", {
+    turnOutcome: "interrupted",
+  })
+})
+
 it("exposes the live message slice and commits through the pane-aware replace", () => {
   const sinks = createStoreRoomSinks()
   expect(sinks.messages.read("room-1")).toEqual([{ id: "m1" }])

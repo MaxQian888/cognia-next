@@ -603,9 +603,23 @@ describe("<EmptyChatState />", () => {
     // The band shares the composer column's measure, so every section below
     // the fold starts on the composer's left edge.
     expect(band.className).toContain("max-w-[46rem]")
-    // The first screen keeps the composer at the optical centre with the band
-    // peeking in below it.
-    expect(firstScreen.className).toContain("min-h-[calc(100%-3.5rem)]")
+    // The band follows the chips directly: the first screen never stretches to
+    // the pane (that left a screen-tall gap under the chips). The whole stack
+    // sits on 2:3 spacers instead, the optical centre.
+    expect(firstScreen.className).not.toContain("min-h-[calc")
+    expect(firstScreen.className).not.toContain("flex-1")
+    const page = firstScreen.parentElement!
+    const outerSpacers = Array.from(page.children).filter(
+      (child) => child.getAttribute("aria-hidden") === "true"
+    )
+    expect(outerSpacers.map((spacer) => spacer.className)).toEqual([
+      "min-h-0 flex-[2]",
+      "min-h-0 flex-[3]",
+    ])
+    expect(outerSpacers[0].compareDocumentPosition(firstScreen)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(band.compareDocumentPosition(outerSpacers[1])).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
     expect(firstScreen).toContainElement(screen.getByTestId("welcome-bloom"))
   })
 

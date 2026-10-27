@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
 import {
   applyTranscriptLiveFrame,
   createTranscriptLiveEncoder,
   isTranscriptLiveFrame,
+  TRANSCRIPT_LIVE_FRAME_MAX_BYTES,
   TRANSCRIPT_LIVE_KEYFRAME_MS,
   type TranscriptLiveFrame,
   type TranscriptLivePart,
@@ -207,5 +211,37 @@ describe("applyTranscriptLiveFrame", () => {
     expect(applyTranscriptLiveFrame(settled, { ...nextFirst, state: "reset", parts: [] })).toBe(
       settled
     )
+  })
+})
+
+describe("the shared live-frame contract (protocol/transcript-live-frame-v1.json)", () => {
+  // The one fixture the Host bridge, the collaboration server and this codec
+  // are each checked against, so their admission rules cannot drift apart.
+  const contract = JSON.parse(
+    readFileSync(join(process.cwd(), "protocol/transcript-live-frame-v1.json"), "utf8")
+  ) as {
+    maxIdLength: number
+    maxFrameBytes: number
+    valid: unknown[]
+    invalid: Array<{ why: string; frame: unknown }>
+  }
+  const admitted = (frame: unknown) =>
+    isTranscriptLiveFrame(frame) &&
+    new TextEncoder().encode(JSON.stringify(frame)).length <= contract.maxFrameBytes
+
+  it("pins the same budget as the encoder", () => {
+    expect(contract.maxFrameBytes).toBe(TRANSCRIPT_LIVE_FRAME_MAX_BYTES)
+    expect(contract.maxIdLength).toBe(256)
+  })
+
+  it.each(contract.valid.map((frame, index) => [index, frame]))(
+    "admits valid frame %i",
+    (_, frame) => {
+      expect(admitted(frame)).toBe(true)
+    }
+  )
+
+  it.each(contract.invalid.map(({ why, frame }) => [why, frame]))("refuses %s", (_, frame) => {
+    expect(admitted(frame)).toBe(false)
   })
 })

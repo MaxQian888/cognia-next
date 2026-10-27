@@ -61,6 +61,12 @@ describe("clampSpan", () => {
 })
 
 describe("projectMessageBody", () => {
+  it("withholds historical inline display media in explicit message and selection references", () => {
+    const body = projectMessageBody([
+      textPart("caption [image: data:image/png;base64,REFERENCE_DISPLAY] after"),
+    ])
+    expect(body).toBe("caption [image] after")
+  })
   it("keeps the readable text", () => {
     expect(projectMessageBody([textPart("hello")])).toBe("hello")
   })

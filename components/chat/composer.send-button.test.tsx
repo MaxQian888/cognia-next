@@ -120,6 +120,50 @@ afterEach(() => {
 })
 
 describe("composer primary button", () => {
+  it("continues a stopped turn with one click, preserving its agent route and partial reply", async () => {
+    const route = { target: { kind: "runtime", runtime: "codex" }, handle: "codex", label: "Codex" }
+    const chat = useChatStore.getState()
+    chat.setActiveSession(session.id)
+    chat.setSessionMessagesLoading(session.id, false)
+    chat.replaceSessionMessages(session.id, [
+      {
+        id: "request",
+        role: "user",
+        parts: [{ type: "text", text: "@codex implement it" }],
+        metadata: { turnRoute: route },
+      },
+      { id: "partial", role: "assistant", parts: [{ type: "text", text: "Working on step two" }] },
+    ])
+    chat.setSessionStatus(session.id, "streaming")
+    chat.setSessionStatus(session.id, "idle", { turnOutcome: "interrupted" })
+    let finish: () => void = () => undefined
+    const { ta, onSend } = renderComposer(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(onSend).toHaveBeenCalledWith(
+      expect.stringContaining("Continue the interrupted task"),
+      [],
+      null,
+      { continuationOf: "request", route }
+    )
+    expect(ta).toHaveValue("")
+    expect(
+      useChatStore.getState().sessions[session.id].messages.map((message) => message.id)
+    ).toEqual(["request", "partial"])
+    expect(await screen.findByRole("button", { name: "Sending…" })).toBeDisabled()
+    await act(async () => {
+      finish()
+      await Promise.resolve()
+    })
+    fireEvent.change(ta, { target: { value: "new instruction" } })
+    expect(await screen.findByRole("button", { name: "Send" })).toBeEnabled()
+  })
+
   it("is a disabled Send when idle and empty, and enables once text is typed", async () => {
     const { ta } = renderComposer()
 

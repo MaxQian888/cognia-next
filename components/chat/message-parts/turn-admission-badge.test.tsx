@@ -70,6 +70,22 @@ beforeEach(() => {
 })
 
 describe("TurnAdmissionBadge", () => {
+  it("labels a retained Host refusal on legacy surfaces without offering an invalid archive retry", () => {
+    const message = {
+      ...userMessage("host-state-refused:a1"),
+      metadata: {
+        hostState: {
+          actionId: "a1",
+          optimistic: true,
+          refusal: { code: "model_access_unavailable", at: 100, messageId: "original" },
+        },
+      },
+    } as UIMessage
+    seed([message])
+    render(<TurnAdmissionBadge message={message} sessionId={SID} />)
+    expect(screen.getByRole("status")).toHaveTextContent("No model access on this shared Host")
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument()
+  })
   it("renders nothing for a turn that ran normally", () => {
     const plain = userMessage("u1")
     seed([plain])

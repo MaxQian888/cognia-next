@@ -29,6 +29,7 @@ import {
   ScheduledTaskApprovalPreview,
 } from "@/components/chat/decisions/scheduled-task-approval-preview"
 import { cn } from "@/lib/utils"
+import { shellCommandOf } from "@/lib/chat/shell-command"
 import type { PendingApproval } from "@cognia/agent-config-types"
 
 /** How much of a `write` payload is worth previewing before it is just noise. */
@@ -50,71 +51,11 @@ export function bareToolName(toolName: string | undefined): string {
   return name.startsWith(CORE_PREFIX) ? name.slice(CORE_PREFIX.length) : name
 }
 
-/**
- * Tool names that run a shell command, across the runtimes that reach this
- * surface (Claude `Bash`, Kimi Code `Bash`, Gemini `run_shell_command`, Codex
- * `exec_command`/`shell`, Cursor `run_terminal_cmd`, …). Lower-cased.
- */
-const SHELL_TOOL_NAMES = new Set([
-  "bash",
-  "shell",
-  "local_shell",
-  "run_shell_command",
-  "exec_command",
-  "execute",
-  "terminal",
-  "run_command",
-  "run_terminal_cmd",
-])
-
-/**
- * Argument keys a shell call carries besides the command. A tool whose name
- * is not recognised still renders as a command when its arguments are only
- * these — an ACP agent titles the call however it likes ("Running: echo hi").
- */
-const SHELL_ARG_KEYS = new Set([
-  "command",
-  "cmd",
-  "description",
-  "cwd",
-  "workdir",
-  "timeout",
-  "timeout_ms",
-  "run_in_background",
-  "is_background",
-])
-
 /** Keys the shell block itself shows; anything else is listed beneath it. */
 const SHELL_SHOWN_KEYS = new Set(["command", "cmd", "description"])
 
 /** Keys an edit carries in the Edit/MultiEdit shape (and ACP diffs mapped to it). */
 const EDIT_ARG_KEYS = new Set(["file_path", "path", "old_string", "new_string", "replace_all"])
-
-/** POSIX-quote one argv element only when it needs it, so `echo hi` stays readable. */
-function quoteArg(arg: string): string {
-  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`
-}
-
-/**
- * The command a shell-like call runs, or `undefined` when this is not one.
- * Accepts a string (`command`/`cmd`) or an argv array (Codex `["bash","-lc",…]`).
- */
-export function shellCommandOf(
-  toolName: string,
-  input: Record<string, unknown>
-): string | undefined {
-  const raw = input.command ?? input.cmd
-  const command =
-    typeof raw === "string"
-      ? raw
-      : Array.isArray(raw) && raw.length > 0 && raw.every((part) => typeof part === "string")
-        ? (raw as string[]).map(quoteArg).join(" ")
-        : undefined
-  if (!command || !command.trim()) return undefined
-  const named = SHELL_TOOL_NAMES.has(toolName.toLowerCase())
-  const shaped = Object.keys(input).every((key) => SHELL_ARG_KEYS.has(key))
-  return named || shaped ? command : undefined
-}
 
 function isEditShaped(input: Record<string, unknown>): boolean {
   return (

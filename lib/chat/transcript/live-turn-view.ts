@@ -66,13 +66,23 @@ export function withLiveTurn(input: {
       liveMessages: [reply],
     }
   }
-  const replaced = tail.some((message) => message.id === live.messageId)
-  return {
-    items,
-    liveMessages: replaced
-      ? tail.map((message) => (message.id === live.messageId ? reply : message))
-      : [...tail, reply],
-  }
+  return { items, liveMessages: withLiveReply(tail, live) }
+}
+
+/**
+ * A message list with a live reply drawn in: in place of its stored copy
+ * (whose other fields stay), or after the rest when nothing is stored yet.
+ * Shared by the timeline's live tail above and a shared run's members, who
+ * draw a flat list (ADR-0241).
+ */
+export function withLiveReply(messages: UIMessage[], live: TranscriptLiveTurn | null): UIMessage[] {
+  if (!live) return messages
+  const reply: UIMessage = { id: live.messageId, role: "assistant", parts: live.parts }
+  return messages.some((message) => message.id === live.messageId)
+    ? messages.map((message) =>
+        message.id === live.messageId ? { ...message, ...reply } : message
+      )
+    : [...messages, reply]
 }
 
 /**

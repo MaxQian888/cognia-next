@@ -19,6 +19,7 @@ import type { UIMessage } from "ai"
 import { normalizeToolName, type ToolPartLike } from "@/lib/chat/tool-summary"
 import { promptPreambleOfParts, stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 import { isToolPart, projectToolOutputText } from "./tool-output-text"
+import { stripInboundDisplayMarkers } from "@/lib/connectors/inbound-stored-parts"
 
 export { contentFingerprint } from "./content-fingerprint"
 
@@ -192,7 +193,7 @@ export function projectMessageBody(parts: unknown): string {
     }
   }
   if (hadPreamble && buf.length > 0) buf.push(REFERENCE_PREAMBLE_OMITTED_NOTE)
-  return buf.join("\n").trim()
+  return stripInboundDisplayMarkers(buf.join("\n")).trim()
 }
 
 /** Format the anchor plus its neighbours, marking which one was pointed at. */

@@ -7,7 +7,11 @@
 // play in the shared VideoBlock player. Binary or unknown files and fetch
 // failures retain the plain download fallback.
 
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import {
+  detectDocumentTypeFromFilename,
+  isBinaryDocumentType,
+} from "@cognia/document/support-matrix"
 import { useTranslations } from "next-intl"
 import { ChevronRightIcon, DownloadIcon, Loader2Icon } from "lucide-react"
 import {
@@ -22,6 +26,7 @@ import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { VideoBlock } from "@/components/chat/renderers/video-block"
+import { RendererErrorBoundary } from "@/components/chat/renderers/renderer-error-boundary"
 import { languageFromPath } from "@/components/chat/message-parts/mcp-renderers/common"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -30,6 +35,14 @@ import {
   renderHTML,
 } from "@/lib/artifacts"
 import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
+import { FilePreviewSurface } from "@/components/file-viewer/file-preview-surface"
+import { BUILTIN_FILE_VIEWERS } from "@/lib/file-viewer/builtins"
+import { extensionOf } from "@/lib/file-viewer/probe"
+import {
+  getFileViewerRevision,
+  resolveFileViewer,
+  subscribeFileViewers,
+} from "@/lib/file-viewer/registry"
 
 export interface FilePartPreviewProps {
   url: string
@@ -41,6 +54,9 @@ export interface FilePartPreviewProps {
    * file is not named twice.
    */
   hideDownloadFallback?: boolean
+  /** The attachment dialog already supplies the file identity and frame. */
+  presentation?: "block" | "document"
+  toolbarContainer?: HTMLElement | null
 }
 
 /** A textual media type (covers `text/*` plus the common `application/*` text formats). */
@@ -54,9 +70,20 @@ function isTextLike(mediaType: string | undefined, filename: string | undefined)
   ) {
     return true
   }
-  // Fall back to the filename extension — languageFromPath returns "text" for
-  // anything it doesn't recognize as code.
-  return /\.(?:md|markdown|mdx)$/i.test(filename ?? "") || languageFromPath(filename) !== "text"
+  // Share the attachment pipeline's format matrix: syntax-highlighting
+  // language detection deliberately calls logs and other plain text "text".
+  const type = detectDocumentTypeFromFilename(filename ?? "")
+  return type !== "unknown" && !isBinaryDocumentType(type)
+}
+
+/** Extra viewers share the workbench registry; built-in chat previews keep their source tabs. */
+function registeredAttachmentViewer(mediaType: string | undefined, filename: string | undefined) {
+  const viewer = resolveFileViewer({
+    extension: extensionOf(filename ?? ""),
+    mimeType: mediaType,
+    source: "attachment",
+  })
+  return viewer && !BUILTIN_FILE_VIEWERS.some((builtin) => builtin.id === viewer.id) ? viewer : null
 }
 
 function isPdf(mediaType: string | undefined, filename: string | undefined): boolean {
@@ -206,15 +233,32 @@ export const FilePartPreview = memo(function FilePartPreview({
   mediaType,
   filename,
   hideDownloadFallback = false,
+  presentation = "block",
+  toolbarContainer,
 }: FilePartPreviewProps) {
   const t = useTranslations("chat.filePreview")
+  useSyncExternalStore(subscribeFileViewers, getFileViewerRevision, getFileViewerRevision)
   const displayName = filename ?? url
   const pdf = isPdf(mediaType, filename)
   const video = !pdf && isVideo(mediaType, filename)
-  const textLike = !pdf && !video && isTextLike(mediaType, filename)
+  const viewer = registeredAttachmentViewer(mediaType, filename)
+  const textLike = !pdf && !video && (viewer !== null || isTextLike(mediaType, filename))
   const markdown = textLike && isMarkdown(mediaType, filename)
   const html = textLike && isHtml(mediaType, filename)
   const text = useFileText(url, textLike)
+  const documentView = presentation === "document"
+  const codeProps = { presentation, toolbarContainer, filename }
+  const viewerRequest = useMemo(
+    () => ({
+      requestId: `attachment:${url}:${viewer?.id ?? ""}`,
+      source: "attachment" as const,
+      relPath: filename ?? "",
+      displayName,
+      mimeType: mediaType,
+      providedText: typeof text === "string" ? text : "",
+    }),
+    [url, viewer?.id, filename, displayName, mediaType, text]
+  )
 
   if (pdf) {
     return (
@@ -263,6 +307,24 @@ export const FilePartPreview = memo(function FilePartPreview({
         </p>
       )
     }
+    if (viewer) {
+      return (
+        <div className="h-[min(60dvh,600px)] min-h-0" data-testid="file-preview-registered">
+          <RendererErrorBoundary
+            resetKey={viewerRequest.requestId}
+            fallback={
+              hideDownloadFallback ? (
+                <p className="text-xs text-muted-foreground">{t("previewUnavailable")}</p>
+              ) : (
+                <DownloadLink url={url} displayName={displayName} />
+              )
+            }
+          >
+            <FilePreviewSurface request={viewerRequest} />
+          </RendererErrorBoundary>
+        </div>
+      )
+    }
     if (html) {
       // Same Preview/Source split as Markdown: an HTML attachment's point is
       // the page it paints, not its markup — the source stays one tab away.
@@ -284,8 +346,8 @@ export const FilePartPreview = memo(function FilePartPreview({
           <TabsContent value="preview">
             <HtmlPreviewFrame html={text} title={displayName} />
           </TabsContent>
-          <TabsContent value="source" className="max-h-96 overflow-auto">
-            <CodeBlock code={text} language="html" filename={filename} />
+          <TabsContent value="source" className={cn(!documentView && "max-h-96 overflow-auto")}>
+            <CodeBlock code={text} language="html" {...codeProps} />
           </TabsContent>
         </Tabs>
       )
@@ -306,23 +368,30 @@ export const FilePartPreview = memo(function FilePartPreview({
               {t("sourceTab")}
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="preview" className="max-h-96 overflow-auto rounded border p-3">
+          <TabsContent
+            value="preview"
+            className={cn("p-4", !documentView && "max-h-96 overflow-auto rounded border p-3")}
+          >
             <MarkdownRenderer content={text} rhythm="document" />
           </TabsContent>
-          <TabsContent value="source" className="max-h-96 overflow-auto">
-            <CodeBlock code={text} language="markdown" filename={filename} />
+          <TabsContent value="source" className={cn(!documentView && "max-h-96 overflow-auto")}>
+            <CodeBlock code={text} language="markdown" {...codeProps} />
           </TabsContent>
         </Tabs>
       )
     }
     return (
-      <div className="my-1" data-testid="file-preview-text">
-        <CodeBlock code={text} language={languageFromPath(filename)} filename={filename} />
+      <div className={cn(!documentView && "my-1")} data-testid="file-preview-text">
+        <CodeBlock code={text} language={languageFromPath(filename)} {...codeProps} />
       </div>
     )
   }
 
-  return <DownloadLink url={url} displayName={displayName} />
+  return hideDownloadFallback ? (
+    <p className="p-4 text-xs text-muted-foreground">{t("previewUnavailable")}</p>
+  ) : (
+    <DownloadLink url={url} displayName={displayName} />
+  )
 })
 
 /** What `FilePartPreview` will draw for a file part. */
@@ -334,7 +403,8 @@ export function filePreviewKind(
 ): FilePreviewKind {
   if (isPdf(mediaType, filename)) return "pdf"
   if (isVideo(mediaType, filename)) return "video"
-  if (!isTextLike(mediaType, filename)) return "file"
+  if (!isTextLike(mediaType, filename) && !registeredAttachmentViewer(mediaType, filename))
+    return "file"
   if (isHtml(mediaType, filename)) return "html"
   if (isMarkdown(mediaType, filename)) return "markdown"
   return "text"
@@ -356,6 +426,7 @@ export const FilePartCard = memo(function FilePartCard({
   defaultExpanded?: boolean
 }) {
   const t = useTranslations("chat.filePreview")
+  useSyncExternalStore(subscribeFileViewers, getFileViewerRevision, getFileViewerRevision)
   const [open, setOpen] = useState(defaultExpanded)
   const bodyId = useId()
   const displayName = filename ?? url

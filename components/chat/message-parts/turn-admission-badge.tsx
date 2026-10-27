@@ -34,6 +34,8 @@ import { dispatchComposerAppend } from "@/components/chat/composer"
 import { useChatStore, useSessionStatus } from "@/stores/chat"
 import { extractPlainText } from "@/lib/inbox/extract-plain-text"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import { refusedHostMessageOf } from "@/lib/chat/refused-host-message"
+import { diagnoseCommandError } from "@/lib/diagnostics/adapters/from-command-error"
 
 /** Leg kinds with a noun of their own; anything else reads as "other work". */
 const HOLDER_KINDS = new Set([
@@ -67,12 +69,24 @@ export function TurnAdmissionBadge({
     return false
   })
 
-  const meta = turnAdmissionMetaOf(message.metadata)
+  const refusal = refusedHostMessageOf(message)
+  const meta = refusal
+    ? {
+        state: "failed" as const,
+        code: diagnoseCommandError({
+          code: refusal.code,
+          message: refusal.code,
+          retryable: false,
+          structured: true,
+        }).code,
+        at: refusal.at,
+      }
+    : turnAdmissionMetaOf(message.metadata)
   if (!meta || !sessionId || message.role !== "user") return null
 
   const display = resolveTurnAdmissionDisplay(meta, { stillQueued: isChatTurnQueued(sessionId) })
   const idle = status === "idle" || status === "error"
-  const canRetry = display !== "queued" && idle && isLastUserTurn
+  const canRetry = !refusal && display !== "queued" && idle && isLastUserTurn
 
   const describeWait = (wait: TurnAdmissionWait): string => {
     if (wait.reason === "capacity") return t("waiting.capacity")

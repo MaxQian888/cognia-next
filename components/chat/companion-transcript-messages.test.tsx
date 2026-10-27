@@ -9,6 +9,8 @@ import {
 const mockPageTurn = jest.fn()
 const mockTimeline: { items: unknown[]; revision: number | null } = { items: [], revision: null }
 const mockLiveReply: { current: unknown } = { current: null }
+const mockRefusedMessages: Array<{ id: string }> = []
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mockRefusedMessages }))
 
 const surfaceProps: Array<Record<string, unknown>> = []
 
@@ -17,6 +19,10 @@ jest.mock("./transcript-timeline-surface", () => ({
     surfaceProps.push(props)
     return <div data-testid="timeline-surface" />
   },
+}))
+
+jest.mock("./refused-host-messages", () => ({
+  RefusedHostMessages: () => <aside aria-label="refused-messages" />,
 }))
 
 jest.mock("@/hooks/chat/session-media-provider", () => ({
@@ -78,11 +84,39 @@ describe("selectActiveTurnMessages", () => {
 })
 
 describe("<CompanionTranscriptMessages />", () => {
+  it("keeps local refused messages mounted even while the confirmed transcript is idle", () => {
+    render(
+      <CompanionTranscriptMessages sessionId="s1" messages={[]} status="idle" onCopy={jest.fn()} />
+    )
+    expect(screen.getByRole("complementary", { name: "refused-messages" })).toBeVisible()
+  })
   beforeEach(() => {
     surfaceProps.splice(0)
     mockTimeline.items = []
     mockTimeline.revision = null
     mockLiveReply.current = null
+    mockRefusedMessages.length = 0
+  })
+
+  it("does not present a refused legacy Host placeholder as a confirmed user message", () => {
+    mockRefusedMessages.push({ id: "u2" })
+    mockTimeline.items = [
+      {
+        kind: "completed-turn",
+        itemKey: "turn:u2",
+        turnKey: "turn:u2",
+        revision: 1,
+        detailRevision: 1,
+        status: "completed",
+        userMessages: [{ id: "u2", role: "user", text: "refused", createdAt: 1 }],
+        collapsed: { exists: false, messageCount: 1, trailingCount: 0, mediaCount: 0 },
+        startedAt: 1,
+      },
+    ]
+    render(
+      <CompanionTranscriptMessages sessionId="s1" messages={[]} status="idle" onCopy={jest.fn()} />
+    )
+    expect(surfaceProps[0]?.items).toEqual([])
   })
 
   const liveReply = (state: "streaming" | "settled") => ({

@@ -195,7 +195,11 @@ export type RoomOutboundAsk =
 export interface RoomRunnerSinks {
   status: {
     get: (sessionId: string) => ChatStatus
-    set: (sessionId: string, status: ChatStatus) => void
+    set: (
+      sessionId: string,
+      status: ChatStatus,
+      options?: { turnOutcome?: "completed" | "interrupted" | "failed" }
+    ) => void
     setError: (sessionId: string, error: string | null) => void
   }
   diagnostic: (sessionId: string, diagnostic: CogniaDiagnostic) => void

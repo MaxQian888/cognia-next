@@ -45,6 +45,25 @@ describe("buildReplyTo / readReplyTo", () => {
 })
 
 describe("replyContextLine / prefixReplyContext", () => {
+  it("withholds inline display bytes when rebuilding a persisted reply header", () => {
+    const preview = "caption [image: data:image/png;base64,PERSISTED_REPLY_SENTINEL"
+    expect(replyContextLine({ messageId: "parent", preview })).toBe(
+      '[Replying to: "caption [image]"]'
+    )
+    expect(buildReplyTo({ id: "parent", parts: [{ type: "text", text: preview }] }).preview).toBe(
+      "caption [image]"
+    )
+    const messages = [
+      {
+        role: "user",
+        parts: [{ type: "text", text: "question" }],
+        metadata: { replyTo: { messageId: "parent", preview } },
+      },
+    ]
+    const out = withReplyContextLines(messages)
+    expect(JSON.stringify(out[0].parts)).not.toContain("PERSISTED_REPLY_SENTINEL")
+    expect(messages[0].metadata.replyTo.preview).toContain("PERSISTED_REPLY_SENTINEL")
+  })
   it("quotes the preview, or names an earlier message when the preview is empty", () => {
     expect(replyContextLine({ messageId: "a", preview: "the plan" })).toBe(
       '[Replying to: "the plan"]'

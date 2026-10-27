@@ -585,6 +585,8 @@ describe("message display actions", () => {
       const cls = bar?.getAttribute("class") ?? ""
       expect(cls).toContain("opacity-0")
       expect(cls).toContain("group-hover:opacity-100")
+      expect(cls).toContain("group-focus-within:opacity-100")
+      expect(cls).toContain("group-has-[[data-state=open]]:opacity-100")
       expect(cls).toContain("focus-within:opacity-100")
       expect(cls).toContain("pointer-coarse:opacity-100")
       // A Radix popup (the "…" overflow) portals out of the row — hover and
@@ -922,6 +924,26 @@ describe("commentary parts", () => {
         .find((node) => node.textContent?.includes("Checking the affected files"))
     ).toBeDefined()
     expect(document.querySelector("[data-test='reasoning']")).toBeNull()
+  })
+})
+
+describe("shared withheld parts", () => {
+  it("renders a withheld placeholder as an inert label, not as an unknown part", () => {
+    const msg = {
+      id: "w1",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "visible" },
+        { type: "data-shared-withheld", data: { reason: "pii" } },
+      ],
+    } as unknown as UIMessage
+
+    render(<MessageRenderer message={msg} />)
+
+    const note = screen.getByRole("note")
+    expect(note.textContent).toBe("sharedWithheld")
+    expect(note.getAttribute("data-inert")).toBe("shared-withheld")
+    expect(note.querySelector("button, a, input")).toBeNull()
   })
 })
 
@@ -2017,6 +2039,34 @@ describe("edit flow", () => {
 // ── speaker display ───────────────────────────────────────────────────────────
 
 describe("team speaker display", () => {
+  it("uses the IM sender portrait instead of a generated initials avatar", () => {
+    const avatarUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+    const { container } = render(
+      <MessageRenderer
+        message={
+          {
+            id: "platform-avatar",
+            role: "user",
+            parts: [{ type: "text", text: "hello" }],
+            metadata: {
+              platformMessage: {
+                sender: {
+                  id: "onebot:12345",
+                  platform: "onebot",
+                  adapterId: "qq-adapter",
+                  remoteUserId: "12345",
+                  displayName: "Remote author",
+                  avatarUrl,
+                },
+              },
+            },
+          } as UIMessage
+        }
+      />
+    )
+    expect(container.querySelector(`img[src="${avatarUrl}"]`)).toBeInTheDocument()
+  })
+
   function sharedMessage(author: Record<string, unknown>): UIMessage {
     return {
       id: "shared-message",
@@ -2184,6 +2234,115 @@ describe("inbound IM rich projection", () => {
     ],
   }
 
+  it("deduplicates legacy OneBot mention fallback and body against the rich message", () => {
+    render(
+      <MessageRenderer
+        message={inbound(
+          [
+            { type: "text", text: "@bot Cognia group test" },
+            { type: "text", text: "Cognia group test" },
+          ],
+          {
+            inboundA2UI: {
+              v: 1,
+              source: "onebot",
+              body: [
+                { kind: "mention", handle: "bot" },
+                { kind: "text", text: "Cognia group test" },
+              ],
+            },
+          }
+        )}
+      />
+    )
+    expect(screen.getByTestId("inbound-a2ui")).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Cognia group test/, { selector: '[data-test="markdown"]' })
+    ).toBeNull()
+  })
+
+  it("deduplicates a legacy OneBot reply fallback when its quote is already displayed", () => {
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: " [reply:previous answer] next question" }], {
+          replyTo: { messageId: "previous-id", preview: "previous answer" },
+          inboundA2UI: {
+            v: 1,
+            source: "onebot",
+            body: [
+              { kind: "reply_context", replyToMessageId: "previous-id" },
+              { kind: "text", text: "next question" },
+            ],
+          },
+        })}
+      />
+    )
+    expect(screen.getByTestId("reply-to-preview")).toHaveTextContent("previous answer")
+    expect(screen.getByTestId("inbound-a2ui")).toBeInTheDocument()
+    expect(screen.queryByText(/next question/, { selector: '[data-test="markdown"]' })).toBeNull()
+  })
+
+  it("deduplicates a live OneBot body containing a literal underscored URL", () => {
+    const text = 'see https://example.com/__keep__/docs; code const text = "keep a_b * 3";'
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text }], {
+          inboundA2UI: { v: 1, source: "onebot", body: [{ kind: "text", text }] },
+        })}
+      />
+    )
+    expect(screen.getByTestId("inbound-a2ui")).toBeInTheDocument()
+    expect(screen.queryByText(text, { selector: '[data-test="markdown"]' })).toBeNull()
+  })
+
+  it("keeps an image preview across unrelated message updates and closes it on recall", async () => {
+    const metadata = {
+      inboundA2UI: {
+        v: 1,
+        source: "lark",
+        body: [{ kind: "image", url: "data:image/png;base64,AAAA", alt: "IM screenshot" }],
+      },
+    }
+    const message = inbound([], metadata)
+    const tree = (value: UIMessage) => (
+      <TooltipProvider>
+        <MessageRenderer message={value} />
+      </TooltipProvider>
+    )
+    const view = render(tree(message))
+    // This suite's translator returns keys rather than localized messages.
+    fireEvent.click(screen.getByRole("button", { name: "previewAria" }))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    view.rerender(tree({ ...message, metadata: { ...metadata, isBookmarked: true } } as UIMessage))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    view.rerender(
+      tree({ ...message, metadata: { ...metadata, deletedAt: Date.now() } } as UIMessage)
+    )
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(screen.queryByRole("img", { name: "IM screenshot" })).toBeNull()
+  })
+
+  it("keeps a preview after deep rehydration and closes it when the message identity changes", () => {
+    const message = inbound([], {
+      inboundA2UI: {
+        v: 1,
+        source: "lark",
+        body: [{ kind: "image", url: "data:image/png;base64,AAAA", alt: "Rehydrated image" }],
+      },
+    })
+    const tree = (value: UIMessage) => (
+      <TooltipProvider>
+        <MessageRenderer message={value} />
+      </TooltipProvider>
+    )
+    const view = render(tree(message))
+    fireEvent.click(screen.getByRole("button", { name: "previewAria" }))
+    view.rerender(tree(JSON.parse(JSON.stringify(message))))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    view.rerender(tree({ ...message, id: `${message.id}-other` }))
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
   it("hides the fallback parts the block already shows", () => {
     render(
       <MessageRenderer
@@ -2204,6 +2363,53 @@ describe("inbound IM rich projection", () => {
     expect(screen.getByText("a different caption")).toBeInTheDocument()
   })
 
+  it("hides covered prose while retaining an attachment absent from the card", () => {
+    render(
+      <MessageRenderer
+        message={inbound(
+          [
+            { type: "text", text: "release notes" },
+            { type: "text", text: "[file: report.pdf]" },
+          ],
+          { inboundA2UI: card }
+        )}
+      />
+    )
+    expect(screen.getAllByText("release notes")).toHaveLength(1)
+    expect(screen.getByText("[file: report.pdf]")).toBeInTheDocument()
+  })
+
+  it("never shows stale parts or a reply quote on an already withdrawn row", () => {
+    render(
+      <MessageRenderer
+        message={inbound([{ type: "text", text: "withdrawn secret" }], {
+          deletedAt: 1,
+          replyTo: { messageId: "parent", preview: "withdrawn quote" },
+        })}
+      />
+    )
+    expect(screen.queryByText("withdrawn secret")).toBeNull()
+    expect(screen.queryByText("withdrawn quote")).toBeNull()
+    expect(screen.getByText("inboundDeleted")).toBeInTheDocument()
+  })
+
+  it("closes an active inline edit when that same message is recalled", () => {
+    const msg = inbound([{ type: "text", text: "old draft" }], {})
+    const resend = jest.fn()
+    const { rerender } = render(<MessageRenderer message={msg} onEditResend={resend} />)
+    fireEvent.click(screen.getByLabelText("editTooltip"))
+    expect(screen.getByRole("textbox")).toHaveValue("old draft")
+    rerender(
+      <MessageRenderer
+        message={{ ...msg, metadata: { deletedAt: 1 } } as UIMessage}
+        onEditResend={resend}
+      />
+    )
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(screen.queryByText("old draft")).toBeNull()
+    expect(resend).not.toHaveBeenCalled()
+  })
+
   it("shows nothing of a withdrawn message's block", () => {
     render(
       <MessageRenderer
@@ -2214,7 +2420,7 @@ describe("inbound IM rich projection", () => {
       />
     )
     expect(screen.queryByTestId("inbound-a2ui")).toBeNull()
-    expect(screen.getByText("[deleted]")).toBeInTheDocument()
+    expect(screen.getByText("inboundDeleted")).toBeInTheDocument()
   })
 
   it("renders a malformed stored block without throwing", () => {
@@ -2253,6 +2459,33 @@ describe("inbound IM rich projection", () => {
       <MessageRenderer message={inbound([{ type: "text", text: "mine" }], {})} />
     )
     expect(container.querySelector('[data-test="markdown"]')).not.toHaveAttribute("data-untrusted")
+  })
+
+  it("keeps malformed IM provenance and typed A2UI parts untrusted", () => {
+    const { container } = render(
+      <MessageRenderer
+        message={inbound(
+          [
+            { type: "text", text: "untrusted card fallback" },
+            { type: "a2ui" } as never,
+            {
+              type: "tool-unknown",
+              toolCallId: "untrusted-tool",
+              state: "output-available",
+              input: {},
+              output: { type: "a2ui" },
+            } as never,
+          ],
+          { platformMessage: null, inboundA2UI: { source: "lark" } }
+        )}
+      />
+    )
+    expect(container.querySelector('[data-test="markdown"]')).toHaveAttribute(
+      "data-untrusted",
+      "true"
+    )
+    expect(container.querySelector('[data-test="a2ui-part"]')).toBeNull()
+    expect(screen.queryByTestId("structured-tool-part")).toBeNull()
   })
 
   it("ignores a stored block with no renderable body", () => {

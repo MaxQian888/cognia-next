@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const resolveContext = jest.fn()
@@ -10,6 +10,22 @@ const mockSync = jest.fn()
 const mockActive = jest.fn()
 jest.mock("@/lib/collab/shared-chat-conversion", () => ({
   convertLocalSessionToShared: (...args: unknown[]) => mockConvert(...args),
+}))
+const mockShareFromNow = jest.fn()
+jest.mock("@/lib/collab/shared-chat-from-now", () => ({
+  shareConversationFromNow: (...args: unknown[]) => mockShareFromNow(...args),
+}))
+const mockDraft = {
+  text: "",
+  setText: jest.fn(),
+  generating: false,
+  fallback: null,
+  generate: jest.fn(),
+  reset: jest.fn(),
+}
+jest.mock("@/hooks/chat/use-conversation-summary-draft", () => ({
+  useConversationSummaryDraft: () => mockDraft,
+  readVisibleSessionMessages: () => [{ id: "m1", role: "user", parts: [] }],
 }))
 const mockScan = jest.fn()
 jest.mock("@/lib/collab/shared-reference-scan", () => {
@@ -277,6 +293,7 @@ it("only converts a local conversation after the explicit share action", async (
   configured()
   render(<SharedSessionPanel session={session()} />)
   fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("radio", { name: "shareModeHistory" }))
   await screen.findByRole("button", { name: "convertAndShare" })
   expect(mockConvert).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole("button", { name: "convertAndShare" }))
@@ -294,6 +311,7 @@ it("warns about embedded transcript snapshots before converting", async () => {
   ])
   render(<SharedSessionPanel session={session()} />)
   fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("radio", { name: "shareModeHistory" }))
   fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
 
   await screen.findByText("shareReferencesTitle")
@@ -313,6 +331,7 @@ it("lets the user back out of a share that would publish snapshots", async () =>
   ])
   render(<SharedSessionPanel session={session()} />)
   fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("radio", { name: "shareModeHistory" }))
   fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
 
   await screen.findByText("shareReferencesTitle")
@@ -328,6 +347,7 @@ it("warns of an uncertain scan instead of claiming zero references", async () =>
   mockScan.mockRejectedValue(new Error("db closed"))
   render(<SharedSessionPanel session={session()} />)
   fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("radio", { name: "shareModeHistory" }))
   fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
 
   await screen.findByText("shareReferencesWarningUnknown")
@@ -340,6 +360,7 @@ it("converts without a dialog when nothing references another transcript", async
   configured()
   render(<SharedSessionPanel session={session()} />)
   fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("radio", { name: "shareModeHistory" }))
   fireEvent.click(await screen.findByRole("button", { name: "convertAndShare" }))
   await waitFor(() => expect(mockConvert).toHaveBeenCalled())
   expect(mockScan).toHaveBeenCalledWith("local_1")
@@ -353,12 +374,77 @@ it("offers no share for a team room, and says why rather than hiding the button"
   configured()
   render(<SharedSessionPanel session={{ ...session(), kind: "team", teamId: "team_1" }} />)
   fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  fireEvent.click(await screen.findByRole("radio", { name: "shareModeHistory" }))
   const share = await screen.findByRole("button", { name: "convertAndShare" })
   expect(share).toBeDisabled()
   expect(screen.getByText("teamRoomConversion")).toBeInTheDocument()
   fireEvent.click(share)
   expect(mockConvert).not.toHaveBeenCalled()
 })
+describe("share from now on (ADR-0241)", () => {
+  afterEach(() => {
+    mockDraft.text = ""
+    mockShareFromNow.mockReset()
+    mockDraft.generate.mockReset()
+  })
+
+  it("defaults to a fresh shared branch and never shows the full-history warning", async () => {
+    configured()
+    mockShareFromNow.mockResolvedValue({ session: { id: "shared_2" }, localSessionId: "shared:x" })
+    render(<SharedSessionPanel session={session()} />)
+    fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+    const start = await screen.findByRole("button", { name: "startShared" })
+    expect(screen.getByRole("radio", { name: "shareModeFromNow" })).toBeChecked()
+    expect(screen.queryByText("historyWarningTitle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "convertAndShare" })).not.toBeInTheDocument()
+
+    fireEvent.click(start)
+    await waitFor(() => expect(mockShareFromNow).toHaveBeenCalledTimes(1))
+    expect(mockShareFromNow.mock.calls[0][1]).toEqual({
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+      attemptId: expect.any(String),
+      background: undefined,
+    })
+    expect(mockConvert).not.toHaveBeenCalled()
+    await waitFor(() => expect(mockActive).toHaveBeenCalledWith("shared:x"))
+  })
+
+  it("posts the edited background under its heading only when the owner starts", async () => {
+    configured()
+    mockDraft.text = "  We chose Postgres.  "
+    mockShareFromNow.mockResolvedValue({ session: { id: "shared_2" }, localSessionId: "shared:x" })
+    render(<SharedSessionPanel session={session()} />)
+    fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+    const start = await screen.findByRole("button", { name: "startShared" })
+    expect(mockShareFromNow).not.toHaveBeenCalled()
+    fireEvent.click(start)
+    await waitFor(() => expect(mockShareFromNow).toHaveBeenCalled())
+    expect(mockShareFromNow.mock.calls[0][1].background).toBe(
+      "backgroundHeading\n\nWe chose Postgres."
+    )
+  })
+
+  it("drafts the background from the conversation's visible thread", async () => {
+    configured()
+    render(<SharedSessionPanel session={session()} />)
+    fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+    fireEvent.click(await screen.findByRole("button", { name: "backgroundDraft" }))
+    expect(mockDraft.generate).toHaveBeenCalledWith([{ id: "m1", role: "user", parts: [] }])
+  })
+
+  it("keeps a team room unshareable from now on too", async () => {
+    configured()
+    render(<SharedSessionPanel session={{ ...session(), kind: "team", teamId: "team_1" }} />)
+    fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+    const start = await screen.findByRole("button", { name: "startShared" })
+    expect(start).toBeDisabled()
+    fireEvent.click(start)
+    expect(mockShareFromNow).not.toHaveBeenCalled()
+  })
+})
+
 it("explains and blocks a share the organization is not offered", async () => {
   configured()
   mockGates["shared-chat"] = {
@@ -376,11 +462,16 @@ it("explains and blocks a share the organization is not offered", async () => {
   try {
     render(<SharedSessionPanel session={session()} />)
     fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
-    const share = await screen.findByRole("button", { name: "convertAndShare" })
-    expect(share).toBeDisabled()
+    const start = await screen.findByRole("button", { name: "startShared" })
+    expect(start).toBeDisabled()
     expect(screen.getByTestId("shared-convert-unavailable")).toHaveTextContent(
       "reason.feature_paused"
     )
+    fireEvent.click(start)
+    expect(mockShareFromNow).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("radio", { name: "shareModeHistory" }))
+    const share = await screen.findByRole("button", { name: "convertAndShare" })
+    expect(share).toBeDisabled()
     fireEvent.click(share)
     expect(mockConvert).not.toHaveBeenCalled()
   } finally {
@@ -598,4 +689,18 @@ it("lets a member who may share the files remove the sharing device", async () =
   fireEvent.click(screen.getByRole("button", { name: "openSharedSession" }))
   const files = await screen.findByTestId("shared-session-files")
   expect(files).toHaveAttribute("data-can-remove-host", "true")
+})
+
+it("lets an owner change what members see of a tool call, and a viewer only read it (ADR-0241)", async () => {
+  configured("owner")
+  const { unmount } = render(<SharedSessionPanel session={shared} />)
+  fireEvent.click(screen.getByRole("button", { name: "openSharedSession" }))
+  const owned = await screen.findByTestId("shared-tool-detail")
+  expect(within(owned).getByRole("switch")).toBeEnabled()
+  unmount()
+  configured("viewer")
+  render(<SharedSessionPanel session={shared} />)
+  fireEvent.click(screen.getByRole("button", { name: "openSharedSession" }))
+  const viewed = await screen.findByTestId("shared-tool-detail")
+  expect(within(viewed).getByRole("switch")).toBeDisabled()
 })

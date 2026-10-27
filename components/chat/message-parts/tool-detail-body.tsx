@@ -42,6 +42,8 @@ import {
 import { TerminalToolBody } from "@/components/chat/message-parts/terminal-tool-part"
 import { FileToolBody, isFileToolPart } from "@/components/chat/message-parts/file-tool-part"
 import { resolveToolPartName } from "@/lib/chat/tool-summary"
+import { GooseChildSessionLink } from "@/components/agent/external-agent/goose-session-controls"
+import type { ExternalAgentToolMetadata } from "@cognia/agent-contracts/external-agent"
 
 /**
  * True for a Bash call under any of its spellings — the flat `tool-Bash` /
@@ -65,6 +67,15 @@ export interface ToolDetailBodyProps {
 
 export function ToolDetailBody({ part, sessionId }: ToolDetailBodyProps) {
   const t = useTranslations("chat.message")
+  const native = (part as unknown as { toolMetadata?: ExternalAgentToolMetadata }).toolMetadata
+    ?.nativeSubagent
+  if (native?.runtime === "goose" && native.readOnly === true)
+    return (
+      <>
+        <GooseChildSessionLink child={native} chatSessionId={sessionId} />
+        <McpToolBodyOrContent part={part} sessionId={sessionId} />
+      </>
+    )
 
   if (part.state === "output-error") {
     const rawError = (part as { errorText?: unknown }).errorText

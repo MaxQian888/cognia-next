@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 import { CompositionPicker } from "@/components/agent/composition/composition-picker"
 import { usePresetCatalog } from "@/hooks/agent/use-preset-catalog"
 import { useCodeSandboxPresentations } from "@/hooks/agent/use-code-sandbox-presentations"
-import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
+import { useAgentRuntimeStore, useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import {
   ActivityIcon,
@@ -88,6 +88,9 @@ import {
 } from "@/lib/presets/apply-to-session"
 import { groupPresets } from "@/lib/presets/group-presets"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
+import { resolveAccountId } from "@/lib/claude/env-resolver"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
+import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session/session-models"
 import { HeaderAccountSwitcher } from "./header-account-switcher"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 import { PlanModeTasksSheet } from "@/components/chat/plan-mode-tasks-sheet"
@@ -287,7 +290,23 @@ export function SessionSettingsSheet({
     () => new Set(session.disabledSkillIds ?? []),
     [session.disabledSkillIds]
   )
-  const { plan, keyOk } = useCredentialStatus()
+  const runtime = useRuntimeRefForSession(session.id)
+  const credentialSettings = useSettingsStore((state) => state.settings)
+  const credentialProvider =
+    runtime.kind === "builtin" && !(session.characterId && character === undefined)
+      ? ((isExternalAgentProviderId(session.providerOverride)
+          ? undefined
+          : session.providerOverride) ??
+        character?.providerId ??
+        resolveAppDefaultModel(credentialSettings).provider ??
+        "anthropic")
+      : null
+  const { plan, keyOk } = useCredentialStatus({
+    providerId: credentialProvider,
+    accountId: credentialProvider
+      ? resolveAccountId(credentialProvider, session, character, credentialSettings)
+      : undefined,
+  })
   const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : null
 
   // What the session actually falls back to when no per-session dir is set:

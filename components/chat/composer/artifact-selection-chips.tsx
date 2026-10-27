@@ -15,12 +15,13 @@
 // nothing for a per-hunk proposal to diff them against, so offering the control
 // would promise a round trip that cannot happen.
 
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   ChevronsUpDownIcon,
   DatabaseIcon,
+  DownloadIcon,
   RefreshCwIcon,
   FileDiff,
   FileCodeIcon,
@@ -39,7 +40,14 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Dialog } from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
+import { useCopy } from "@/hooks/ui/use-copy"
+import { downloadFile } from "@/lib/files/download"
+import { FileTypeBadge } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
+import { unwrapUntrustedContent } from "@/lib/web/untrusted-content"
 import {
   MAX_MESSAGE_SPAN,
   buildMessageReferenceText,
@@ -61,6 +69,7 @@ import {
 } from "@/lib/chat/selection/message-set-reference"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
 import { useComposerSessionId } from "./composer-session-context"
+import { ContextPreviewDialogContent, ContextPreviewDialogHeader } from "./context-preview-dialog"
 
 export interface ArtifactSelectionChipsProps {
   /** Render bare (no padded container) for composition inside ContextChipBar. */
@@ -77,6 +86,37 @@ const KIND_ICONS = {
   entity: DatabaseIcon,
 } as const
 
+function SelectionPreviewActions({ title, body }: { title: string; body: string }) {
+  const t = useTranslations("common")
+  const tArtifact = useTranslations("artifacts")
+  const { copied, copy } = useCopy()
+  const copyLabel = t(copied ? "copied" : "copy")
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={copyLabel}
+        title={copyLabel}
+        onClick={() => void copy(body)}
+      >
+        <CopyFeedbackIcon copied={copied} size={14} />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={tArtifact("download")}
+        title={tArtifact("download")}
+        onClick={() =>
+          void downloadFile(`${title.replace(/\.+$/, "")}.txt`, body, "text/plain;charset=utf-8")
+        }
+      >
+        <DownloadIcon className="size-4" />
+      </Button>
+    </>
+  )
+}
+
 export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsProps = {}) {
   const t = useTranslations("artifacts.review")
   // The `@memory:` / `@issue:` / … nouns live with the picker's own copy, not
@@ -90,6 +130,11 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
   const remove = useChatStore((s) => s.removeContextSelection)
   const promote = useChatStore((s) => s.promoteContextSelection)
   const replace = useChatStore((s) => s.replaceContextSelection)
+  const [previewIdentity, setPreviewIdentity] = useState<string | null>(null)
+  const previewTitleRef = useRef<HTMLHeadingElement>(null)
+  const previewTriggerRef = useRef<HTMLButtonElement>(null)
+  const preview = selections.find((sel) => contextSelectionIdentity(sel) === previewIdentity)
+  const previewBody = unwrapUntrustedContent(preview?.snapshot ?? "")
 
   // Re-check on mount and whenever the window regains focus. Those are the two
   // moments a chip can have gone stale without this pane hearing about it: the
@@ -393,13 +438,21 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
             data-selection-kind={sel.kind}
             data-edit-target={showEditTarget && isTarget ? "true" : undefined}
             className={cn(
-              "group flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs",
+              "group relative flex h-14 w-[13.5rem] max-w-full items-center gap-1.5 rounded-xl border bg-card py-1.5 pr-7 pl-1.5 text-xs shadow-xs hover:border-foreground/20",
               showEditTarget && isTarget && "border-primary/50"
             )}
             title={isStale ? t("selectionStaleHint") : sel.comment || label}
             data-stale={isStale ? "true" : undefined}
           >
-            <Icon className="size-3.5 text-muted-foreground" />
+            <FileTypeBadge
+              path={sel.kind === "file" ? sel.relPath : sel.kind === "artifact" ? sel.title : ""}
+              icon={
+                sel.kind === "file" ? undefined : (
+                  <Icon className="size-[18px] text-muted-foreground" />
+                )
+              }
+              className="size-9"
+            />
             {canPromote ? (
               <button
                 type="button"
@@ -411,7 +464,17 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
                 {label}
               </button>
             ) : (
-              <span className="max-w-[min(280px,calc(100vw-6rem))] truncate">{label}</span>
+              <button
+                type="button"
+                aria-label={t("previewSelectionAria", { title: sel.title })}
+                onClick={(event) => {
+                  previewTriggerRef.current = event.currentTarget
+                  setPreviewIdentity(contextSelectionIdentity(sel))
+                }}
+                className="min-w-0 max-w-[min(280px,calc(100vw-6rem))] truncate text-left font-medium hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {label}
+              </button>
             )}
             {isStale ? (
               <Button
@@ -502,7 +565,7 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
               size="icon-sm"
               aria-label={t("removeSelectionAria", { title: sel.title })}
               onClick={() => remove(index, composerSessionId)}
-              className="size-5 opacity-60 transition-opacity hover:opacity-100"
+              className="absolute top-1 right-1 size-5 rounded-full bg-background/90 p-0 opacity-80 shadow-xs ring-1 ring-border/60 transition-opacity hover:opacity-100 [&>svg]:size-2.5"
             >
               <XIcon className="size-3" />
             </Button>
@@ -512,6 +575,46 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
     </>
   )
 
-  if (bare) return chips
-  return <div className="flex flex-wrap gap-1.5 px-2 pt-2">{chips}</div>
+  return (
+    <>
+      {bare ? chips : <div className="flex flex-wrap gap-1.5 px-2 pt-2">{chips}</div>}
+      <Dialog open={Boolean(preview)} onOpenChange={(open) => !open && setPreviewIdentity(null)}>
+        <ContextPreviewDialogContent
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            previewTitleRef.current?.focus({ preventScroll: true })
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            previewTriggerRef.current?.focus({ preventScroll: true })
+          }}
+        >
+          <ContextPreviewDialogHeader
+            title={preview?.title}
+            titleRef={previewTitleRef}
+            description={preview ? labelFor(preview) : null}
+            toolbarLabel={t("previewToolbarAria")}
+          >
+            {preview ? (
+              <SelectionPreviewActions
+                key={contextSelectionIdentity(preview)}
+                title={preview.title}
+                body={previewBody}
+              />
+            ) : null}
+          </ContextPreviewDialogHeader>
+          <ScrollArea className="min-h-0 min-w-0 flex-1">
+            <div className="p-4">
+              <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                {previewBody}
+              </pre>
+              {preview?.comment ? (
+                <p className="mt-3 text-sm text-muted-foreground">{preview.comment}</p>
+              ) : null}
+            </div>
+          </ScrollArea>
+        </ContextPreviewDialogContent>
+      </Dialog>
+    </>
+  )
 }

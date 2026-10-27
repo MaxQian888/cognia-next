@@ -55,6 +55,9 @@ describe("reconcileSessionRun", () => {
     const d = deps()
     await expect(reconcileSessionRun("s1", d, store)).resolves.toBe("settled")
     expect(slice().status).toBe("idle")
+    expect(slice().messages[0].metadata).toMatchObject({
+      chatTurnOutcome: { state: "interrupted", retryable: true },
+    })
     expect(slice().runTiming.startedAt).toBeNull()
     const parts = slice().messages[1].parts as Array<{ state: string }>
     expect(parts.map((part) => part.state)).toEqual(["output-available", "output-error"])

@@ -141,14 +141,148 @@ import {
 } from "./claude-chat-events"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { useChatStore } from "@/stores/chat"
+import { setSdkSessionId } from "@/lib/db/sessions"
 import { clearSidecarLogTrail } from "@/lib/chat/sidecar-log-trail"
+import type { UIMessage } from "ai"
 import {
   __clearAllProjectHistoryEvidenceForTesting,
   drainProjectHistoryEvidence,
   recordProjectHistoryEvidence,
 } from "@/lib/claude/project-history-evidence-registry"
 
+describe("connector ingress during chat streaming", () => {
+  const sessionId = "inbound-stream"
+  const inbound: UIMessage = {
+    id: "canonical-inbound",
+    role: "user",
+    parts: [{ type: "text", text: "new question" }],
+    metadata: { createdAt: 100, platformMessage: { platform: "onebot", messageId: "remote" } },
+  }
+  const assistant: UIMessage = {
+    id: "stream-answer",
+    role: "assistant",
+    parts: [{ type: "text", text: "partial" }],
+    metadata: { createdAt: 200 },
+  }
+
+  beforeEach(() => {
+    useChatStore.getState().clear()
+    useChatStore.getState().setActiveSession(sessionId)
+    useChatStore.getState().replaceSessionMessages(sessionId, [inbound, assistant])
+    applySdkEventMock.mockReset()
+    mockPersistMessages.mockClear()
+  })
+  afterEach(() => useChatStore.getState().clear())
+
+  it("merges committed ingress into an older mirror before applying the next stream event", async () => {
+    const mirror = { current: new Map([[sessionId, [assistant]]]) }
+    const persist = jest.fn()
+    const registry = new SessionCoalescingRegistry({
+      onCommit: (id, messages) => useChatStore.getState().replaceSessionMessages(id, messages),
+      onPersist: persist,
+      persistDelayMs: 0,
+    })
+    applySdkEventMock.mockImplementationOnce((messages: UIMessage[]) => ({
+      messages: messages.map((message) =>
+        message.id === assistant.id
+          ? { ...message, parts: [{ type: "text", text: "continued" }] }
+          : message
+      ),
+      turnComplete: false,
+    }))
+    try {
+      await handleEvent(
+        { type: "event", sessionId, event: { type: "stream_event" } } as never,
+        { current: sessionId },
+        { current: [] },
+        { current: new Map() },
+        { current: new Map() },
+        { current: null },
+        { messagesMirrorRef: mirror, registry, getExecutionHandle: () => undefined }
+      )
+      registry.get(sessionId).commit.flush()
+      expect(applySdkEventMock.mock.calls[0]?.[0]).toEqual([inbound, assistant])
+      expect(mirror.current.get(sessionId)?.map((message) => message.id)).toEqual([
+        inbound.id,
+        assistant.id,
+      ])
+      expect(useChatStore.getState().sessions[sessionId].messages[0]).toBe(inbound)
+      expect(persist).toHaveBeenCalledWith(sessionId, mirror.current.get(sessionId))
+    } finally {
+      registry.clear()
+    }
+  })
+
+  it.each(["result", "session_ended"])(
+    "keeps projected inbound rows through a stale %s terminal snapshot",
+    async (terminal) => {
+      const mirror = { current: new Map([[sessionId, [assistant]]]) }
+      const registry = new SessionCoalescingRegistry({
+        onCommit: (id, messages) => useChatStore.getState().replaceSessionMessages(id, messages),
+        onPersist: jest.fn(),
+        persistDelayMs: 0,
+      })
+      if (terminal === "result") {
+        applySdkEventMock.mockReturnValueOnce({ messages: [assistant], turnComplete: true })
+      }
+      try {
+        await handleEvent(
+          terminal === "result"
+            ? ({ type: "event", sessionId, event: { type: "result" } } as never)
+            : { type: "session_ended", sessionId },
+          { current: sessionId },
+          { current: [] },
+          { current: new Map() },
+          { current: new Map() },
+          { current: null },
+          { messagesMirrorRef: mirror, registry, getExecutionHandle: () => undefined }
+        )
+        expect(
+          useChatStore.getState().sessions[sessionId].messages.map((message) => message.id)
+        ).toEqual([inbound.id, assistant.id])
+        expect(mockPersistMessages.mock.calls.at(-1)?.[1]).toEqual([
+          inbound,
+          expect.objectContaining({ id: assistant.id }),
+        ])
+        // Only streaming commits merge ingress; explicit replacement still clears it.
+        useChatStore.getState().replaceSessionMessages(sessionId, [])
+        expect(useChatStore.getState().sessions[sessionId].messages).toEqual([])
+      } finally {
+        registry.clear()
+      }
+    }
+  )
+})
+
 describe("Claude chat event seam", () => {
+  it("does not acknowledge reconstructed history when the replacement identity fails to persist", async () => {
+    mockAcknowledgeTranscriptRuntime.mockClear()
+    jest.mocked(setSdkSessionId).mockRejectedValueOnce(new Error("identity write refused"))
+    const error = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      await handleEvent(
+        {
+          type: "sdk_session_id",
+          sessionId: "identity-failure",
+          sdkSessionId: "fresh",
+          transcriptInvalidationId: "replacement",
+        } as never,
+        { current: null },
+        { current: [] },
+        { current: new Map() },
+        { current: new Map() },
+        { current: null },
+        {
+          messagesMirrorRef: { current: new Map() },
+          registry: {},
+          getExecutionHandle: () => undefined,
+        } as never
+      )
+      expect(mockAcknowledgeTranscriptRuntime).not.toHaveBeenCalled()
+    } finally {
+      error.mockRestore()
+    }
+  })
   it("acknowledges an initialized headless AI runtime without a controller send cache", async () => {
     useChatStore.setState({ lastSendBySession: {} })
     mockAcknowledgeTranscriptRuntime.mockClear()
@@ -390,9 +524,9 @@ describe("Claude chat event seam", () => {
   it.each([
     { turnId: "new-turn", provider: "openai", acknowledged: true },
     { turnId: "old-turn", provider: "openai", acknowledged: false },
-    { turnId: "new-turn", provider: "anthropic", acknowledged: false },
+    { turnId: "new-turn", provider: "anthropic", acknowledged: true },
   ])(
-    "acknowledges only a matching AI-SDK initialization: %j",
+    "acknowledges only a matching reconstructed runtime initialization: %j",
     async ({ turnId, provider, acknowledged }) => {
       mockAcknowledgeTranscriptRuntime.mockClear()
       useChatStore.setState({

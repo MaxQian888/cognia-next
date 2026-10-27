@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { LinkIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -13,19 +12,24 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { resolveCurrentCollabContext } from "@/lib/collab/runtime-client"
 import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { openAcceptedSharedSession } from "@/lib/collab/open-shared-session"
 import { useShellNav } from "@/components/shell/use-shell-nav"
-import { cn } from "@/lib/utils"
 
 /** Entry point for invitees who do not yet have a conversation to open. */
-export function SharedSessionJoin({ className }: { className?: string } = {}) {
+export function SharedSessionJoin({
+  open,
+  onOpenChange,
+  onCloseAutoFocus,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCloseAutoFocus?: (event: Event) => void
+}) {
   const t = useTranslations("chatCollaboration")
   const { switchToDm } = useShellNav()
-  const [open, setOpen] = useState(false)
   const [token, setToken] = useState("")
   const [busy, setBusy] = useState(false)
   const featureEnabled = useSharedChatEnabled()
@@ -52,7 +56,7 @@ export function SharedSessionJoin({ className }: { className?: string } = {}) {
         switchToDm,
       })
       setToken("")
-      setOpen(false)
+      onOpenChange(false)
       toast.success(t("inviteAccepted"))
     } catch {
       toast.error(t("inviteAcceptFailed"))
@@ -62,25 +66,8 @@ export function SharedSessionJoin({ className }: { className?: string } = {}) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {/* A secondary row, not a centred text button: bare, it read as a
-            stray banner at the top of the phone drawer and under the
-            desktop account card. */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "w-full justify-start gap-2 font-normal text-muted-foreground hover:text-foreground",
-            className
-          )}
-          data-testid="shared-session-join-trigger"
-        >
-          <LinkIcon className="size-4" aria-hidden="true" />
-          {t("acceptInvite")}
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{t("acceptInvite")}</DialogTitle>
           <DialogDescription>{t("joinDescription")}</DialogDescription>

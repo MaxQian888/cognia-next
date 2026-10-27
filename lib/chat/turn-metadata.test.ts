@@ -1,5 +1,9 @@
 import { turnMetadataSendOptions } from "./turn-metadata"
 
+it("carries the interrupted user-turn anchor through every composer host", () => {
+  expect(turnMetadataSendOptions({ continuationOf: "u1" })).toEqual({ continuationOf: "u1" })
+})
+
 describe("turnMetadataSendOptions", () => {
   it("omits absent fields so a spread adds no undefined keys", () => {
     expect(turnMetadataSendOptions(undefined)).toEqual({})

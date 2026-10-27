@@ -1,10 +1,23 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useTranslations } from "next-intl"
 import { FilePartCard, FilePartPreview, filePreviewKind } from "./file-part-preview"
+import { __resetFileViewersForTesting, registerFileViewer } from "@/lib/file-viewer/registry"
+import type { FileViewerProbe } from "@/lib/file-viewer/types"
+
+jest.mock("@/components/file-viewer/file-preview-surface", () => ({
+  FilePreviewSurface: ({ request }: { request: { providedText: string; source: string } }) => {
+    if (request.providedText === "throw viewer") throw new Error("Viewer failed")
+    return (
+      <div data-testid="registered-file-preview" data-source={request.source}>
+        {request.providedText}
+      </div>
+    )
+  },
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: jest.fn(),
@@ -31,6 +44,7 @@ jest.mock("@/components/chat/markdown-renderer", () => ({
 
 const fetchMock = jest.fn()
 beforeEach(() => {
+  __resetFileViewersForTesting()
   const messages = jest.requireActual("@/i18n/messages/en/chat.json").filePreview
   jest.mocked(useTranslations).mockReturnValue(((key: string, vars?: Record<string, unknown>) => {
     const message = key
@@ -47,6 +61,14 @@ afterEach(() => {
 })
 
 describe("FilePartPreview", () => {
+  it("leaves download to the host for files without a supported preview", () => {
+    render(<FilePartPreview url="blob:binary" filename="archive.bin" hideDownloadFallback />)
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
+    expect(
+      screen.getByText("Preview is unavailable. Use the download button above.")
+    ).toBeInTheDocument()
+  })
+
   it("renders a download link for an unknown/binary type", () => {
     render(
       <FilePartPreview url="blob:abc" mediaType="application/octet-stream" filename="data.bin" />
@@ -104,6 +126,67 @@ describe("FilePartPreview", () => {
     } as Response)
     render(<FilePartPreview url="blob:py" filename="script.py" />)
     await waitFor(() => expect(screen.getByTestId("code-block").dataset.language).toBe("python"))
+  })
+
+  it.each(["output.log", "notes.txt", "values.tsv", "config.ini", "module.swift", "script.cjs"])(
+    "previews %s as text despite a generic binary MIME type",
+    async (filename) => {
+      fetchMock.mockResolvedValue({ ok: true, text: async () => "Original file body\nsecond line" })
+      render(
+        <FilePartPreview
+          url={`blob:${filename}`}
+          filename={filename}
+          mediaType="application/octet-stream"
+        />
+      )
+      expect(await screen.findByTestId("code-block")).toHaveTextContent("Original file body")
+      expect(screen.queryByTestId("file-download-link")).not.toBeInTheDocument()
+      expect(filePreviewKind("application/octet-stream", filename)).toBe("text")
+    }
+  )
+
+  it("uses a registered viewer for an attachment format without a built-in preview", async () => {
+    const matches = jest.fn((probe: FileViewerProbe) => probe.extension === "custom")
+    const dispose = registerFileViewer({
+      id: "test.custom",
+      priority: 200,
+      matches,
+      load: async () => ({ default: () => null }),
+    })
+    fetchMock.mockResolvedValue({ ok: true, text: async () => "Custom file body" })
+    render(
+      <FilePartPreview
+        url="blob:custom"
+        filename="diagram.custom"
+        mediaType="application/octet-stream"
+      />
+    )
+    expect(await screen.findByTestId("registered-file-preview")).toHaveTextContent(
+      "Custom file body"
+    )
+    expect(screen.getByTestId("registered-file-preview")).toHaveAttribute(
+      "data-source",
+      "attachment"
+    )
+    expect(matches).toHaveBeenCalledWith(
+      expect.objectContaining({ extension: "custom", source: "attachment" })
+    )
+    expect(filePreviewKind("application/octet-stream", "diagram.custom")).toBe("text")
+    act(dispose)
+  })
+
+  it("keeps a download fallback when a registered renderer fails", async () => {
+    jest.spyOn(console, "error").mockImplementation(() => {})
+    const dispose = registerFileViewer({
+      id: "test.broken",
+      priority: 200,
+      matches: (probe) => probe.extension === "custom",
+      load: async () => ({ default: () => null }),
+    })
+    fetchMock.mockResolvedValue({ ok: true, text: async () => "throw viewer" })
+    render(<FilePartPreview url="blob:broken" filename="broken.custom" />)
+    expect(await screen.findByRole("link", { name: "Download broken.custom" })).toBeInTheDocument()
+    act(dispose)
   })
 
   it.each([
@@ -211,6 +294,27 @@ describe("filePreviewKind", () => {
 })
 
 describe("FilePartCard", () => {
+  it("updates an already visible card when an extra viewer registers and disposes", async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => "Late viewer body" })
+    render(<FilePartCard url="blob:late" filename="report.custom" />)
+    expect(screen.getByRole("link", { name: "Download report.custom" })).toBeInTheDocument()
+    let dispose = () => {}
+    act(() => {
+      dispose = registerFileViewer({
+        id: "test.late",
+        priority: 200,
+        matches: (probe) => probe.extension === "custom",
+        load: async () => ({ default: () => null }),
+      })
+    })
+    expect(await screen.findByTestId("registered-file-preview")).toHaveTextContent(
+      "Late viewer body"
+    )
+    act(dispose)
+    expect(screen.queryByTestId("registered-file-preview")).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Download report.custom" })).toBeInTheDocument()
+  })
+
   it("heads a previewable file with the file card, its kind and a download action", async () => {
     fetchMock.mockResolvedValue({ ok: true, text: async () => "print(1)" })
     render(<FilePartCard url="blob:py" mediaType="text/x-python" filename="main.py" />)

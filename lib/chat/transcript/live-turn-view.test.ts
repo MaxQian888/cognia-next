@@ -2,7 +2,7 @@ import type { UIMessage } from "ai"
 import type { TranscriptTimelineItem } from "@cognia/agent-config-types"
 
 import type { TranscriptLiveTurn } from "./live-frames"
-import { settledReplyCaughtUp, withLiveTurn } from "./live-turn-view"
+import { settledReplyCaughtUp, withLiveReply, withLiveTurn } from "./live-turn-view"
 
 const live = (overrides: Partial<TranscriptLiveTurn> = {}): TranscriptLiveTurn => ({
   sessionId: "s1",
@@ -129,5 +129,40 @@ describe("settledReplyCaughtUp", () => {
     expect(settledReplyCaughtUp(settled, 5, 5)).toBe(false)
     expect(settledReplyCaughtUp(settled, 6, 5)).toBe(true)
     expect(settledReplyCaughtUp(settled, 6, null)).toBe(false)
+  })
+})
+
+describe("withLiveReply (ADR-0241)", () => {
+  const turn: TranscriptLiveTurn = {
+    sessionId: "s",
+    messageId: "a",
+    replyTo: "u",
+    seq: 2,
+    parts: [{ type: "text", text: "live" }],
+    state: "streaming",
+    stale: false,
+  }
+  const user = { id: "u", role: "user", parts: [{ type: "text", text: "q" }] } as UIMessage
+
+  it("leaves the list alone without a live reply", () => {
+    const list = [user]
+    expect(withLiveReply(list, null)).toBe(list)
+  })
+
+  it("appends a reply nothing stored yet", () => {
+    expect(withLiveReply([user], turn)).toEqual([
+      user,
+      { id: "a", role: "assistant", parts: turn.parts },
+    ])
+  })
+
+  it("draws over the stored copy and keeps its other fields", () => {
+    const stored = {
+      id: "a",
+      role: "assistant",
+      parts: [{ type: "text", text: "old" }],
+      metadata: { model: "m" },
+    } as UIMessage
+    expect(withLiveReply([user, stored], turn)).toEqual([user, { ...stored, parts: turn.parts }])
   })
 })

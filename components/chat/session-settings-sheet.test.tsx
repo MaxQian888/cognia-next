@@ -134,6 +134,7 @@ const mockBranch = branchSessionAtMessage as unknown as jest.Mock
 import type { ReactNode } from "react"
 import { SessionSettingsSheet } from "./session-settings-sheet"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
+import { useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import type { ChatSession, Character, SystemPromptPreset, Skill } from "@cognia/agent-config-types"
@@ -189,6 +190,43 @@ const mkCharacter = (overrides: Partial<Character> = {}): Character => ({
 })
 
 describe("SessionSettingsSheet", () => {
+  it("probes the inherited Character account and provider", () => {
+    const character = mkCharacter({ providerId: "openai", accountIdOverride: "character-account" })
+    const Wrapper = withAdapter(makeAdapter({ useCharacter: () => character }))
+    render(
+      <Wrapper>
+        <SessionSettingsSheet
+          session={mkSession({ characterId: character.id })}
+          open={true}
+          onOpenChange={jest.fn()}
+        />
+      </Wrapper>
+    )
+    expect(mockCredentialStatus).toHaveBeenLastCalledWith({
+      providerId: "openai",
+      accountId: "character-account",
+    })
+  })
+
+  it("does not borrow builtin credentials for an external runtime", () => {
+    const runtime = useAgentRuntimeStore.getState()
+    runtime.setSessionRuntimeRef("external-sheet", { kind: "external", agentId: "agent" })
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <SessionSettingsSheet
+          session={mkSession({ id: "external-sheet" })}
+          open={true}
+          onOpenChange={jest.fn()}
+        />
+      </Wrapper>
+    )
+    expect(mockCredentialStatus).toHaveBeenLastCalledWith({
+      providerId: null,
+      accountId: undefined,
+    })
+    runtime.clearSessionRuntimeRef("external-sheet")
+  })
   beforeEach(() => {
     mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
     mockIsTauri.mockReturnValue(false)

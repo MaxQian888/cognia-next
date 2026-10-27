@@ -26,6 +26,8 @@ import { MotionReveal } from "@/components/chat/motion/motion-reveal"
 interface Props {
   messages: UIMessage[]
   scrollRef: React.RefObject<HTMLDivElement | null>
+  /** The controlled viewport's unique ID, including split panes. */
+  scrollTargetId?: string
   virtualizer: Virtualizer<HTMLDivElement, Element>
   virtualize: boolean
   /** Height of the live-tail region — see `useTimelineScrollSync`. */
@@ -43,6 +45,7 @@ const SCRUB_CARD_HALF = 22
 const MAX_COLLAPSED_MARKERS = 128
 const EXPANDED_VIRTUALIZE_THRESHOLD = 40
 const EXPANDED_ROW_ESTIMATE = 48
+const MIN_THUMB_FRACTION = 0.04
 
 /**
  * Pick the turn whose rail position is nearest the pointer fraction `frac`
@@ -78,13 +81,8 @@ interface ScrubState {
 
 /**
  * Scroll offset for a thumb dragged so its TOP sits `thumbTop` px down the
- * rail. The rail maps `[0, railHeight]` onto `[0, totalSize]` — the same
- * mapping `useTimelineScrollSync` uses to place the thumb — so dragging is
- * exactly the inverse of rendering and the thumb tracks the pointer 1:1.
- *
- * `maxScrollTop` clamps the result: the last viewport-height of content cannot
- * be scrolled past, so without it the bottom of the rail would map to an
- * offset the container silently refuses, and the thumb would stick.
+ * rail. The available track excludes the rendered thumb, including its
+ * minimum size in very long conversations. Both ends remain reachable.
  */
 export function scrollTopForThumb(params: {
   thumbTop: number
@@ -94,11 +92,14 @@ export function scrollTopForThumb(params: {
 }): number {
   const { thumbTop, railHeight, totalSize, maxScrollTop } = params
   if (railHeight <= 0 || totalSize <= 0) return 0
-  const fraction = thumbTop / railHeight
+  const ceiling = Math.max(0, maxScrollTop)
+  const viewportFraction = Math.max(0, Math.min(1, 1 - ceiling / totalSize))
+  const thumbFraction = Math.max(MIN_THUMB_FRACTION, viewportFraction)
+  const travel = railHeight * (1 - thumbFraction)
+  if (travel <= 0) return 0
+  const fraction = thumbTop / travel
   const clampedFraction = fraction < 0 ? 0 : fraction > 1 ? 1 : fraction
-  const target = clampedFraction * totalSize
-  const ceiling = maxScrollTop < 0 ? 0 : maxScrollTop
-  return target > ceiling ? ceiling : target
+  return clampedFraction * ceiling
 }
 
 /**
@@ -115,6 +116,7 @@ export function scrollTopForThumb(params: {
 export const ConversationTimeline = memo(function ConversationTimeline({
   messages,
   scrollRef,
+  scrollTargetId,
   virtualizer,
   virtualize,
   getTailSize,
@@ -154,6 +156,11 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   )
 
   const geom = useTimelineScrollSync({ scrollRef, virtualizer, virtualize, turns, getTailSize })
+  const scrollFraction = Math.min(
+    1,
+    Math.max(0, geom.viewportHeight < 1 ? geom.viewportTop / (1 - geom.viewportHeight) : 0)
+  )
+  const thumbHeight = Math.min(1, Math.max(geom.viewportHeight, MIN_THUMB_FRACTION))
   const bookmarkedIndices = useMemo(() => {
     const indices = new Set<number>()
     for (let index = 0; index < turns.length; index++) {
@@ -348,8 +355,8 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [turns, geom.activeIndex, jumpTo]
   )
 
-  // Keyboard parity for the rail, which is pointer-only (aria-hidden). These
-  // fire while the composer has focus, so they must not be a chord the textarea
+  // Anchor shortcuts remain available while the composer has focus, so they
+  // must not be a chord the textarea
   // wants — see the catalog note on the chosen combo. Monaco keeps its own
   // keymap in the Canvas/editor surfaces.
   const shortcutOptions = {
@@ -381,14 +388,19 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   const onRailClick = useCallback(() => {
     // A drag ends with a click on the rail; without this the release would also
     // jump to whatever turn happened to be nearest, undoing the drag.
-    if (draggingRef.current) return
+    if (draggingRef.current || suppressClickRef.current) {
+      suppressClickRef.current = false
+      setScrub(null)
+      return
+    }
     if (scrub && turns[scrub.index]) jumpTo(turns[scrub.index])
   }, [scrub, turns, jumpTo])
 
   // ── Drag the viewport thumb ─────────────────────────────────────────────
-  const railRef = useRef<HTMLButtonElement>(null)
+  const railRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
   const draggingRef = useRef(false)
+  const suppressClickRef = useRef(false)
   /** Where inside the thumb the pointer grabbed it, so it doesn't jump on grab. */
   const grabOffsetRef = useRef(0)
 
@@ -398,27 +410,25 @@ export const ConversationTimeline = memo(function ConversationTimeline({
       const el = scrollRef.current
       if (!rail || !el) return
       const rect = rail.getBoundingClientRect()
-      const totalSize =
-        virtualize && virtualizer
-          ? virtualizer.getTotalSize() + (getTailSize?.() ?? 0)
-          : el.scrollHeight
       el.scrollTop = scrollTopForThumb({
         thumbTop: clientY - rect.top - grabOffsetRef.current,
         railHeight: rect.height,
-        totalSize,
+        totalSize: el.scrollHeight,
         maxScrollTop: el.scrollHeight - el.clientHeight,
       })
     },
-    [scrollRef, virtualize, virtualizer, getTailSize]
+    [scrollRef]
   )
 
   const onThumbPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return
     // Otherwise the rail beneath treats the press as click-to-jump.
     e.stopPropagation()
     e.preventDefault()
     const thumb = e.currentTarget.getBoundingClientRect()
     grabOffsetRef.current = e.clientY - thumb.top
     draggingRef.current = true
+    suppressClickRef.current = true
     setDragging(true)
     setScrub(null)
     // Capture so the drag survives the pointer leaving the 16px rail — which
@@ -440,8 +450,69 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     e.stopPropagation()
     draggingRef.current = false
     setDragging(false)
-    e.currentTarget.releasePointerCapture?.(e.pointerId)
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
   }, [])
+
+  const onRailKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.ctrlKey || event.altKey || event.metaKey) return
+      const el = scrollRef.current
+      if (!el) return
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
+      const page = el.clientHeight * 0.9
+      let top: number
+      switch (event.key) {
+        case "ArrowUp":
+          top = el.scrollTop - 40
+          break
+        case "ArrowDown":
+          top = el.scrollTop + 40
+          break
+        case "PageUp":
+          top = el.scrollTop - page
+          break
+        case "PageDown":
+          top = el.scrollTop + page
+          break
+        case "Home":
+          top = 0
+          break
+        case "End":
+          top = max
+          break
+        case " ":
+          top = el.scrollTop + (event.shiftKey ? -page : page)
+          break
+        default:
+          return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      el.scrollTop = Math.min(max, Math.max(0, top))
+    },
+    [scrollRef]
+  )
+
+  useEffect(() => {
+    const rail = railRef.current
+    if (!rail || expanded) return
+    // React wheel handlers are passive in Chromium. A non-passive listener
+    // keeps the wheel over this sibling rail on the controlled viewport.
+    const onWheel = (event: WheelEvent) => {
+      const el = scrollRef.current
+      if (!el || event.ctrlKey || event.metaKey || Math.abs(event.deltaX) > Math.abs(event.deltaY))
+        return
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
+      if (!max || !event.deltaY) return
+      event.preventDefault()
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1
+      el.scrollTop = Math.min(max, Math.max(0, el.scrollTop + event.deltaY * unit))
+    }
+    rail.addEventListener("wheel", onWheel, { passive: false })
+    return () => rail.removeEventListener("wheel", onWheel)
+  }, [expanded, scrollRef, allTurns.length])
 
   const scrubTurn = scrub ? turns[scrub.index] : null
   // The scrub card re-renders on every mousemove (setScrub). Memoize the
@@ -550,18 +621,14 @@ export const ConversationTimeline = memo(function ConversationTimeline({
         // `timeline-visibility.ts` — the JS gate decides whether to mount,
         // this one keeps a mounted-but-too-narrow frame from painting.
         "hidden @4xl/message-list:flex",
-        // In flow in BOTH states. The panel always was (as an overlay it sat on
-        // top of the message text, unreadable in any pane under ~1344px), but
-        // the collapsed rail used to be `absolute right-0`, which put it
-        // directly on top of the message list's native scrollbar — so on any
-        // platform with classic (non-overlay) scrollbars the rail swallowed
-        // every scrollbar drag. Its own 16px lane costs the reading column
-        // almost nothing and hands the scrollbar back.
+        // Both states own an in-flow lane. Scoped CSS hides native chrome
+        // only when the collapsed rail is actually painted at this pane width.
         "relative h-full shrink-0",
         expanded ? "" : "w-4"
       )}
       onPointerLeave={() => setScrub(null)}
       data-testid="conversation-timeline"
+      data-conversation-timeline={expanded ? "expanded" : "collapsed"}
       data-computer-use-pip-obstacle
     >
       {expanded ? (
@@ -601,7 +668,10 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               </Button>
             </span>
           </div>
-          <div ref={expandedScrollRef} className="relative flex-1 overflow-y-auto py-1">
+          <div
+            ref={expandedScrollRef}
+            className="conversation-scroll relative min-h-0 flex-1 overflow-y-auto py-1"
+          >
             {turns.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-muted-foreground">
                 {t("noBookmarks")}
@@ -692,7 +762,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               aria-hidden
               data-testid="timeline-scrub-card"
               className="pointer-events-none absolute right-full z-30 mr-1 w-44 -translate-y-1/2 rounded-md border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md"
-              style={{ top: scrub?.y }}
+              style={{ top: `calc(1.75rem + ${scrub?.y ?? 0}px)` }}
             >
               {scrubTime && (
                 <div className="text-[10px] font-medium tabular-nums text-muted-foreground">
@@ -703,11 +773,16 @@ export const ConversationTimeline = memo(function ConversationTimeline({
             </div>
           )}
 
-          {/* Rail body — pointer-driven scrub + click-to-jump. */}
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-hidden
+          {/* One scrollbar: continuous scrolling plus the existing anchors. */}
+          <div
+            role="scrollbar"
+            tabIndex={0}
+            aria-label={t("scrollConversation")}
+            aria-controls={scrollTargetId}
+            aria-orientation="vertical"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(scrollFraction * 100)}
             data-testid="timeline-rail"
             ref={railRef}
             // Pointer, not mouse: the rail was mouse-only, so a stylus (and any
@@ -715,14 +790,13 @@ export const ConversationTimeline = memo(function ConversationTimeline({
             onPointerMove={onRailPointerMove}
             onPointerLeave={() => setScrub(null)}
             onClick={onRailClick}
-            className="absolute inset-0 cursor-pointer bg-transparent transition-colors hover:bg-accent/30"
+            onPointerDown={() => {
+              suppressClickRef.current = false
+            }}
+            onKeyDown={onRailKeyDown}
+            className="absolute inset-x-0 bottom-0 top-7 touch-none cursor-pointer rounded-full bg-transparent transition-colors hover:bg-accent/30 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-[-2px]"
           >
-            {/* Viewport region — the "where you are" shade, VSCode-minimap
-                style: a translucent band across the whole lane BEHIND the
-                markers (they render later and stay visible inside it), so the
-                rail reads as one map — content + current view — rather than a
-                scrollbar pill stacked on a navigation strip. Still the drag
-                handle for continuous scrubbing. */}
+            {/* The single scroll thumb shares its lane with turn markers. */}
             <span
               aria-hidden
               data-testid="timeline-viewport-thumb"
@@ -730,15 +804,16 @@ export const ConversationTimeline = memo(function ConversationTimeline({
               onPointerMove={onThumbPointerMove}
               onPointerUp={onThumbPointerUp}
               onPointerCancel={onThumbPointerUp}
+              onLostPointerCapture={onThumbPointerUp}
               className={cn(
-                "absolute inset-x-0 border-y transition-colors",
+                "absolute inset-x-1 rounded-full transition-colors",
                 dragging
-                  ? "cursor-grabbing border-foreground/40 bg-foreground/20"
-                  : "cursor-grab border-foreground/20 bg-foreground/10 group-hover:border-foreground/30 group-hover:bg-foreground/15"
+                  ? "cursor-grabbing bg-foreground/40"
+                  : "cursor-grab bg-foreground/20 group-hover:bg-foreground/30"
               )}
               style={{
-                top: `${geom.viewportTop * 100}%`,
-                height: `${Math.max(geom.viewportHeight * 100, 4)}%`,
+                top: `${scrollFraction * (1 - thumbHeight) * 100}%`,
+                height: `${thumbHeight * 100}%`,
               }}
             />
             {railMarkers.map((marker, markerIndex) => {
@@ -758,7 +833,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
                     // Dots at rest, short dashes on hover: widening on hover
                     // reads as the rail "opening up" under the pointer, and a
                     // dash is far easier to aim at than a 6px dot.
-                    "absolute right-1 -translate-y-1/2 rounded-full transition-all",
+                    "pointer-events-none absolute right-1 -translate-y-1/2 rounded-full transition-all",
                     isScrub ? "h-2 w-2" : "h-1.5 w-1.5 group-hover:h-1 group-hover:w-2.5",
                     marker.isBookmarked
                       ? "bg-yellow-500"
@@ -772,7 +847,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
                 />
               )
             })}
-          </button>
+          </div>
         </div>
       )}
     </div>

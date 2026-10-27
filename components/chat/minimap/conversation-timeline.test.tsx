@@ -124,7 +124,10 @@ beforeEach(() => {
   mockBookmarkedIds = []
 })
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  document.querySelectorAll("[data-timeline-test-scroller]").forEach((node) => node.remove())
+})
 
 describe("ConversationTimeline", () => {
   it("renders nothing when there are no user turns", () => {
@@ -536,15 +539,37 @@ describe("scrollTopForThumb", () => {
   it("never returns a negative offset even with a nonsense ceiling", () => {
     expect(scrollTopForThumb({ ...base, thumbTop: 100, maxScrollTop: -10 })).toBe(0)
   })
+
+  it("maps a minimum-sized thumb across the full range of a very long conversation", () => {
+    const long = { railHeight: 200, totalSize: 100_000, maxScrollTop: 99_800 }
+    // The four-percent minimum occupies 8px. The remaining 192px must
+    // cover the entire scroll range, including the exact bottom endpoint.
+    expect(scrollTopForThumb({ ...long, thumbTop: 96 })).toBe(49_900)
+    expect(scrollTopForThumb({ ...long, thumbTop: 192 })).toBe(99_800)
+    expect(scrollTopForThumb({ ...long, thumbTop: 200 })).toBe(99_800)
+  })
+
+  it("has no draggable range when all content fits in the viewport", () => {
+    expect(scrollTopForThumb({ ...base, thumbTop: 100, maxScrollTop: 0 })).toBe(0)
+  })
 })
 
 describe("ConversationTimeline — dragging the viewport thumb", () => {
   /** A real scroll container so the drag has something to move. */
-  function renderWithScroller(opts?: { virtualize?: boolean }) {
+  function renderWithScroller(opts?: {
+    virtualize?: boolean
+    scrollHeight?: number
+    initialTop?: number
+  }) {
     const scroller = document.createElement("div")
-    Object.defineProperty(scroller, "scrollHeight", { value: 1000, configurable: true })
+    scroller.id = "conversation-log"
+    scroller.setAttribute("data-timeline-test-scroller", "")
+    Object.defineProperty(scroller, "scrollHeight", {
+      value: opts?.scrollHeight ?? 1000,
+      configurable: true,
+    })
     Object.defineProperty(scroller, "clientHeight", { value: 200, configurable: true })
-    let top = 0
+    let top = opts?.initialTop ?? 0
     Object.defineProperty(scroller, "scrollTop", {
       configurable: true,
       get: () => top,
@@ -553,7 +578,7 @@ describe("ConversationTimeline — dragging the viewport thumb", () => {
       },
     })
     document.body.append(scroller)
-
+    const virtualizer = makeVirtualizer()
     render(
       <TooltipProvider>
         <ConversationTimeline
@@ -564,13 +589,15 @@ describe("ConversationTimeline — dragging the viewport thumb", () => {
             msg("a2", "assistant", "answer two"),
           ]}
           scrollRef={{ current: scroller as HTMLDivElement }}
-          virtualizer={makeVirtualizer()}
+          scrollTargetId={scroller.id}
+          virtualizer={virtualizer}
           virtualize={opts?.virtualize ?? false}
         />
       </TooltipProvider>
     )
     return {
       scroller,
+      virtualizer,
       get scrollTop() {
         return top
       },
@@ -597,6 +624,89 @@ describe("ConversationTimeline — dragging the viewport thumb", () => {
   const dragTo = (thumb: Element, clientY: number) =>
     fireEvent(thumb, new MouseEvent("pointermove", { clientY, bubbles: true }))
 
+  it("exposes one named, keyboard-focusable scrollbar linked to the message viewport", () => {
+    renderWithScroller()
+    const rail = screen.getByRole("scrollbar", { name: "scrollConversation" })
+    expect(rail).toHaveAttribute("aria-controls", "conversation-log")
+    expect(rail).toHaveAttribute("aria-orientation", "vertical")
+    expect(rail).toHaveAttribute("aria-valuemin", "0")
+    expect(rail).toHaveAttribute("aria-valuemax", "100")
+    expect(rail).toHaveAttribute("tabindex", "0")
+    expect(screen.getAllByRole("scrollbar")).toHaveLength(1)
+    expect(rail.closest("[data-conversation-timeline]")).toHaveAttribute(
+      "data-conversation-timeline",
+      "collapsed"
+    )
+  })
+
+  it("scrolls continuously with arrow, page and endpoint keys", () => {
+    const view = renderWithScroller()
+    const rail = screen.getByRole("scrollbar", { name: "scrollConversation" })
+    fireEvent.keyDown(rail, { key: "ArrowDown" })
+    expect(view.scrollTop).toBe(40)
+    fireEvent.keyDown(rail, { key: "PageDown" })
+    expect(view.scrollTop).toBe(220)
+    fireEvent.keyDown(rail, { key: "End" })
+    expect(view.scrollTop).toBe(800)
+    fireEvent.keyDown(rail, { key: "ArrowDown" })
+    expect(view.scrollTop).toBe(800)
+    fireEvent.keyDown(rail, { key: "Home" })
+    expect(view.scrollTop).toBe(0)
+    fireEvent.keyDown(rail, { key: "PageUp" })
+    expect(view.scrollTop).toBe(0)
+    fireEvent.keyDown(rail, { key: " ", ctrlKey: true })
+    expect(view.scrollTop).toBe(0)
+    fireEvent.keyDown(rail, { key: " " })
+    expect(view.scrollTop).toBe(180)
+    fireEvent.keyDown(rail, { key: " ", shiftKey: true })
+    expect(view.scrollTop).toBe(0)
+  })
+
+  it("forwards wheel pixels, lines and pages while preserving zoom and horizontal gestures", () => {
+    const view = renderWithScroller()
+    const rail = screen.getByRole("scrollbar", { name: "scrollConversation" })
+    const wheel = new WheelEvent("wheel", { deltaY: 50, bubbles: true, cancelable: true })
+    fireEvent(rail, wheel)
+    expect(wheel.defaultPrevented).toBe(true)
+    expect(view.scrollTop).toBe(50)
+    fireEvent.wheel(rail, { deltaY: 2, deltaMode: 1 })
+    expect(view.scrollTop).toBe(82)
+    fireEvent.wheel(rail, { deltaY: 1, deltaMode: 2 })
+    expect(view.scrollTop).toBe(282)
+    fireEvent.wheel(rail, { deltaY: 1, ctrlKey: true })
+    fireEvent.wheel(rail, { deltaY: 10, deltaX: 100 })
+    expect(view.scrollTop).toBe(282)
+  })
+
+  it("does not jump to an anchor when releasing a dragged thumb generates a click", () => {
+    const view = renderWithScroller({ virtualize: true })
+    const rail = mockRailRect(0, 200)
+    firePointer(rail, 100)
+    const thumb = grabThumb(0)
+    dragTo(thumb, 80)
+    fireEvent(thumb, new MouseEvent("pointerup", { clientY: 80, bubbles: true }))
+    firePointer(rail, 100)
+    fireEvent.click(rail)
+    expect(view.virtualizer.scrollToIndex).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("timeline-scrub-card")).not.toBeInTheDocument()
+    // A new, intentional rail press must still be allowed to jump.
+    fireEvent.pointerDown(rail)
+    firePointer(rail, 100)
+    fireEvent.click(rail)
+    expect(view.virtualizer.scrollToIndex).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("timeline-scrub-card")).toBeInTheDocument()
+  })
+
+  it("stops dragging after pointer cancellation", () => {
+    const view = renderWithScroller()
+    mockRailRect(0, 200)
+    const thumb = grabThumb(0)
+    dragTo(thumb, 80)
+    fireEvent(thumb, new MouseEvent("pointercancel", { bubbles: true }))
+    dragTo(thumb, 160)
+    expect(view.scrollTop).toBe(400)
+  })
+
   it("scrolls the conversation as the thumb is dragged", () => {
     const view = renderWithScroller()
     mockRailRect(0, 200)
@@ -608,6 +718,23 @@ describe("ConversationTimeline — dragging the viewport thumb", () => {
 
     dragTo(thumb, 40)
     expect(view.scrollTop).toBe(200)
+  })
+
+  it("does not jump when grabbing a bottom thumb whose virtual list has outer padding", () => {
+    // The virtualizer knows only 1000px. The actual scroller includes 40px
+    // of reading-column padding, so its bottom is 840px rather than 800px.
+    const view = renderWithScroller({ virtualize: true, scrollHeight: 1040, initialTop: 840 })
+    mockRailRect(0, 200)
+    const rail = screen.getByRole("scrollbar", { name: "scrollConversation" })
+    expect(rail).toHaveAttribute("aria-valuenow", "100")
+    const thumb = screen.getByTestId("timeline-viewport-thumb")
+    const top = Number.parseFloat(thumb.style.top) * 2
+    const height = Number.parseFloat(thumb.style.height) * 2
+    thumb.getBoundingClientRect = () => ({ top, height }) as DOMRect
+    fireEvent(thumb, new MouseEvent("pointerdown", { clientY: top + 5, bubbles: true }))
+    dragTo(thumb, top + 5)
+    expect(view.scrollTop).toBeCloseTo(840)
+    expect(Number.parseFloat(thumb.style.height)).toBeCloseTo((200 / 1040) * 100)
   })
 
   it("keeps the grab point under the pointer instead of snapping the thumb", () => {

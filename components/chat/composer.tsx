@@ -182,6 +182,10 @@ import { useLinkFolding } from "./composer/hooks/use-link-folding"
 import { CommandHintBar } from "./composer/command-hint-bar"
 import { ScheduleSuggestion } from "./composer/schedule-suggestion"
 import { resolveSendButton } from "./composer/send-button-mode"
+import { canContinueChat, lastUserMessage } from "@/lib/chat/continuation"
+import { selectVisibleMessages } from "@/stores/chat"
+import { readTurnRoute } from "@/lib/chat/turn-route/types"
+import { useOpenGoal } from "@/components/goal/use-active-goal"
 import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { canEnqueueInboxWrite, useInboxWriteReadiness } from "@/lib/connectors/inbox-writes"
@@ -540,6 +544,8 @@ interface InnerProps {
    * attachment list binds it.
    */
   attachmentCitations: AttachmentCitations
+  canResume?: boolean
+  onResume?: () => void | Promise<void>
   onStop: () => void | Promise<void>
   commandRunning?: boolean
   /**
@@ -1972,6 +1978,20 @@ function ComposerInner(props: InnerProps) {
     // conversion below preserves count) so the guard can be armed BEFORE the
     // first await, leaving no race for a concurrent submit to slip through.
     const empty = text.trim().length === 0 && attachments.files.length === 0
+    if (empty && props.canResume && props.onResume) {
+      turnInFlightRef.current = true
+      setTurnInFlight(true)
+      try {
+        await props.onResume()
+        return true
+      } catch (error) {
+        console.warn("chat continuation failed", error)
+        return false
+      } finally {
+        turnInFlightRef.current = false
+        setTurnInFlight(false)
+      }
+    }
     if (empty) return false
 
     // Validate before arming send protection: this return never enters the
@@ -3371,6 +3391,7 @@ function ComposerInner(props: InnerProps) {
     isPreparingAttachments,
     hasContent:
       !props.commandRunning && (textValue.trim().length > 0 || attachments.files.length > 0),
+    canResume: props.canResume,
     hasPendingDrafts: (props.pendingDraftCount ?? 0) > 0,
     composerDisabled: !!props.disabled,
     outboundBlocked,
@@ -4045,6 +4066,52 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const toolbarInBox = toolbarSitsInBox(skin.toolbarLayout) || compactLayout
   const focusedStatus = useChatStore((s) => s.status)
   const status = paneStatus ?? focusedStatus
+  const tContinuation = useTranslations("chat.composer")
+  const openGoal = useOpenGoal(session?.id)
+  const canResume = useChatStore((state) => {
+    if (!session || session.platformBinding || session.kind === "subagent" || openGoal) return false
+    const slice =
+      state.sessions[session.id] ?? (state.activeSessionId === session.id ? state : undefined)
+    return (
+      !!slice &&
+      !slice.messagesLoading &&
+      canContinueChat({
+        status: paneStatus ?? slice.status,
+        messages: selectVisibleMessages(slice.messages, slice.activeBranchByGroup),
+        diagnostic: slice.errorDiagnostic,
+        errorMessage: slice.errorMessage,
+        queued: !!("queuedTurnMessageId" in slice && slice.queuedTurnMessageId),
+      })
+    )
+  })
+  const handleResume = useCallback(async () => {
+    if (!session || disabled || !canResume) return
+    const state = useChatStore.getState()
+    const slice =
+      state.sessions[session.id] ?? (state.activeSessionId === session.id ? state : undefined)
+    if (
+      !slice ||
+      !canContinueChat({
+        status: slice.status,
+        messages: selectVisibleMessages(slice.messages, slice.activeBranchByGroup),
+        diagnostic: slice.errorDiagnostic,
+        errorMessage: slice.errorMessage,
+        queued: !!("queuedTurnMessageId" in slice && slice.queuedTurnMessageId),
+      })
+    )
+      return
+    const user = lastUserMessage(selectVisibleMessages(slice.messages, slice.activeBranchByGroup))
+    if (!user) return
+    const route = readTurnRoute(user.metadata)
+    const memberIds = (user.metadata as { targetMemberIds?: unknown } | undefined)?.targetMemberIds
+    await onSend(tContinuation("resumePrompt"), [], null, {
+      continuationOf: user.id,
+      ...(route ? { route } : {}),
+      ...(Array.isArray(memberIds) && memberIds.every((id) => typeof id === "string")
+        ? { targetMemberIds: memberIds }
+        : {}),
+    })
+  }, [canResume, disabled, onSend, session, tContinuation])
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   // Keyed by THIS composer's session, not by focus: in split view the
   // unfocused pane echoed its slash-command results into the other pane's
@@ -4904,6 +4971,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   videoRoute={videoRoute}
                   imageInput={imageInput}
                   status={promptStatus}
+                  canResume={canResume}
+                  onResume={handleResume}
                   disabled={disabled}
                   onSubmit={handleSubmit}
                   attachmentCitations={attachmentCitations}

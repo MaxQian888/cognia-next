@@ -8,7 +8,7 @@ import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useGitStore } from "@/stores/git/git-store"
 import { createOnboardingRequest } from "@/lib/onboarding/request"
-import { getSession } from "@/lib/db/sessions"
+import { getSession, updateSession } from "@/lib/db/sessions"
 import { listMessages } from "@/lib/db/messages"
 import { invalidateTranscriptRuntime } from "@/lib/chat/transcript/revision-events"
 import { getDb } from "@/lib/db/schema"
@@ -24,6 +24,7 @@ jest.mock("@/lib/db/schema", () => {
 jest.mock("@/lib/db/sessions", () => ({
   ...jest.requireActual("@/lib/db/sessions"),
   getSession: jest.fn(),
+  updateSession: jest.fn(async () => undefined),
 }))
 jest.mock("@/lib/db/messages", () => ({
   ...jest.requireActual("@/lib/db/messages"),
@@ -101,6 +102,61 @@ const PROJECT_B = {
 }
 
 describe("prepareTranscriptRuntimeSend", () => {
+  it.each(["anthropic", "openai"] as const)(
+    "refuses a recalled current prompt for %s after invalidation",
+    async (provider) => {
+      jest.mocked(getSession).mockResolvedValue({
+        id: "s1",
+        sdkSessionId: "old",
+        runtimeTranscriptInvalidated: "g1",
+        runtimeTranscriptGeneration: "g1",
+      } as never)
+      jest.mocked(listMessages).mockResolvedValue([
+        {
+          id: "current",
+          role: "user",
+          parts: [{ type: "text", text: "[deleted]" }],
+          metadata: { deletedAt: 1 },
+        },
+      ])
+      await expect(
+        prepareTranscriptRuntimeSend("s1", { provider, turnId: "current" })
+      ).rejects.toThrow("inbound_message_recalled")
+    }
+  )
+  it("rebuilds an invalidated native SDK query without resuming withdrawn history", async () => {
+    jest.mocked(getSession).mockResolvedValue({
+      id: "s1",
+      sdkSessionId: "old-sdk",
+      runtimeTranscriptGeneration: "g1",
+      runtimeTranscriptInvalidated: "g1",
+    } as never)
+    jest.mocked(listMessages).mockResolvedValue([
+      {
+        id: "recalled",
+        role: "user",
+        parts: [{ type: "text", text: "[deleted]" }],
+        metadata: { deletedAt: 1 },
+      },
+      { id: "kept", role: "user", parts: [{ type: "text", text: "kept question" }] },
+      { id: "current", role: "user", parts: [{ type: "text", text: "new prompt" }] },
+    ])
+    const prepared = await prepareTranscriptRuntimeSend("s1", {
+      provider: "anthropic",
+      resumeSessionId: "old-sdk",
+      forkFromSessionId: "old-parent",
+      turnId: "current",
+    })
+    expect(prepared.resumeSessionId).toBeUndefined()
+    expect(prepared.forkFromSessionId).toBeUndefined()
+    expect(updateSession).toHaveBeenCalledWith("s1", {
+      sdkSessionId: undefined,
+      forkedFromSdkSessionId: undefined,
+    })
+    expect(prepared.appendSystemPrompt).toContain("kept question")
+    expect(prepared.appendSystemPrompt).not.toContain("new prompt")
+    expect(prepared.transcriptInvalidationId).toBe("g1")
+  })
   beforeEach(() => {
     jest
       .mocked(getSession)

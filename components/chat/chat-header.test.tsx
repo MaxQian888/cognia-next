@@ -66,6 +66,7 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 jest.mock("@/components/inbox/platform-conversation-context", () => ({
+  PlatformConversationIdentity: () => <span>SnowLuma QQ</span>,
   PlatformConversationHeader: ({ session }: { session: { id: string } }) => (
     <div data-testid="platform-controls" data-session={session.id} />
   ),
@@ -397,6 +398,10 @@ describe("ChatHeader", () => {
       </Wrapper>
     )
     expect(screen.getByTestId("platform-controls")).toBeInTheDocument()
+    const identity = screen.getByText("SnowLuma QQ")
+    expect(identity.closest(".flex-1")).not.toContainElement(
+      screen.getByTestId("platform-controls")
+    )
     expect(screen.getByRole("img", { name: "Telegram" })).toBeInTheDocument()
     expect(screen.queryByTestId("chat-header-open-in-inbox")).not.toBeInTheDocument()
   })

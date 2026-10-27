@@ -8,7 +8,7 @@
 // session is never mutated. See `lib/chat/branch-session.ts`.
 
 import { useId, useState } from "react"
-import { useLocale, useTranslations } from "next-intl"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   Dialog,
@@ -20,17 +20,17 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Loader2Icon } from "lucide-react"
-import { useChatStore, selectVisibleMessages } from "@/stores/chat/chat-store"
-import { useSettingsStore } from "@/stores/settings"
+import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
-import { deleteSession, getSession, updateSession } from "@/lib/db/sessions"
-import { buildAgentBackedLlmClient } from "@/lib/ai/generation/agent-backed-client"
-import { renderConversationSegments, structuralSummary } from "@/lib/ai/generation/summarizer"
-import { summarizeMaterial, type SummaryOutcome } from "@/lib/ai/generation/summarize-material"
+import { deleteSession, updateSession } from "@/lib/db/sessions"
+import {
+  readVisibleSessionMessages,
+  useConversationSummaryDraft,
+} from "@/hooks/chat/use-conversation-summary-draft"
+import { ConversationSummaryEditor } from "@/components/chat/conversation-summary-editor"
 import {
   branchSessionAtMessage,
   type BranchMode,
@@ -49,17 +49,6 @@ const log = createLogger("chat-branch")
 /** Broker lease label for the headless fallback — what the runs console shows. */
 const SUMMARY_TURN_LABEL = "Branch summary"
 
-/** Why the preview holds a digest rather than a model summary. */
-type SummaryFallbackReason = Extract<SummaryOutcome, { kind: "unavailable" }>["reason"]
-
-/** Message key per reason (next-intl keys stay camelCase). */
-const SUMMARY_FALLBACK_KEYS = {
-  empty: "summary.fallback.empty",
-  "no-client": "summary.fallback.noClient",
-  "no-output": "summary.fallback.noOutput",
-  pii: "summary.fallback.pii",
-} as const satisfies Record<SummaryFallbackReason, string>
-
 /** Where a branch lands: its own conversation, or an aside in the dock. */
 type BranchTarget = "session" | "aside"
 
@@ -74,7 +63,6 @@ interface Props {
 
 export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props) {
   const t = useTranslations("chat.branch")
-  const locale = useLocale()
   const isMobile = usePlatform() === "mobile"
   const [mode, setMode] = useState<BranchMode>("direct")
   const [workingSetPolicy, setWorkingSetPolicy] = useState<BranchWorkingSetPolicy>("as-of")
@@ -83,15 +71,22 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
   // "aside" is the lighter destination for an exploration you expect to fold
   // back, and is desktop-only because the mobile shell mounts no workbench.
   const [target, setTarget] = useState<BranchTarget>("session")
-  const [summaryText, setSummaryText] = useState("")
+  const summary = useConversationSummaryDraft({
+    sessionId,
+    turnLabel: SUMMARY_TURN_LABEL,
+    onError: (err) => {
+      log.error("branch-summary-failed", { sessionId, error: String(err) })
+      toast.error(t("summaryError"))
+    },
+  })
+  const summaryText = summary.text
+  const generating = summary.generating
   // Cherry-pick. `null` means "everything up to the cut-off" — the default and
   // the pre-existing behaviour; a Set means the user opened the picker and is
   // choosing. Kept out of `mode` because it composes with direct branching
   // rather than replacing it.
   const [picked, setPicked] = useState<Set<string> | null>(null)
-  const [generating, setGenerating] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [summaryFallback, setSummaryFallback] = useState<SummaryFallbackReason | null>(null)
 
   // Reset transient state on close so the next open starts fresh — avoids a
   // setState-in-effect cascade (the desktop toolbar keeps this dialog mounted).
@@ -101,9 +96,7 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
       setWorkingSetPolicy("as-of")
       setTarget("session")
       setPicked(null)
-      setSummaryText("")
-      setSummaryFallback(null)
-      setGenerating(false)
+      summary.reset()
       setCreating(false)
     }
     onOpenChange(next)
@@ -125,15 +118,7 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
    * missing while the top-level projection is live; fall back to it in that
    * case only.
    */
-  const visibleMessages = () => {
-    const state = useChatStore.getState()
-    const slice = state.sessions[sessionId]
-    if (slice) return selectVisibleMessages(slice.messages, slice.activeBranchByGroup)
-    if (sessionId === state.activeSessionId) {
-      return selectVisibleMessages(state.messages, state.activeBranchByGroup)
-    }
-    return []
-  }
+  const visibleMessages = () => readVisibleSessionMessages(sessionId)
 
   const keptUpToMessage = () => {
     const visible = visibleMessages()
@@ -141,43 +126,7 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
     return idx < 0 ? [] : visible.slice(0, idx + 1)
   }
 
-  const generateSummary = async () => {
-    setGenerating(true)
-    try {
-      const session = await getSession(sessionId)
-      const appSettings = useSettingsStore.getState().settings
-      // The utility model, then a headless turn. The utility client alone is
-      // null on a subscription account (no renderer key), which made every
-      // summary there a silent head/tail digest.
-      const client = await buildAgentBackedLlmClient({
-        session,
-        appSettings,
-        featureId: "conversation-summary",
-        label: SUMMARY_TURN_LABEL,
-      })
-      const messages = keptUpToMessage()
-      const outcome = await summarizeMaterial({
-        segments: renderConversationSegments(messages),
-        purpose: "branch-seed",
-        client,
-        locale,
-      })
-      if (outcome.kind === "summary") {
-        setSummaryText(outcome.text)
-        setSummaryFallback(null)
-      } else {
-        // Still a usable seed, but the preview now SAYS it is not a summary —
-        // and why — instead of passing a digest off as one.
-        setSummaryText(outcome.reason === "empty" ? "" : structuralSummary(messages))
-        setSummaryFallback(outcome.reason)
-      }
-    } catch (err) {
-      log.error("branch-summary-failed", { sessionId, error: String(err) })
-      toast.error(t("summaryError"))
-    } finally {
-      setGenerating(false)
-    }
-  }
+  const generateSummary = () => summary.generate(keptUpToMessage())
 
   // Auto-generate the first summary when the user switches to summary mode.
   const onModeChange = (next: string) => {
@@ -388,37 +337,14 @@ export function BranchDialog({ sessionId, messageId, open, onOpenChange }: Props
             ))}
 
           {mode === "summary" && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">{t("summary.previewLabel")}</Label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 text-xs"
-                  onClick={() => void generateSummary()}
-                  disabled={generating}
-                >
-                  {generating && <Loader2Icon className="mr-1 size-3 animate-spin" />}
-                  {t("summary.regenerate")}
-                </Button>
-              </div>
-              <Textarea
-                value={summaryText}
-                onChange={(e) => setSummaryText(e.target.value)}
-                rows={6}
-                placeholder={generating ? t("summary.generating") : t("summary.placeholder")}
-                disabled={generating}
-              />
-              {summaryFallback && !generating ? (
-                <p
-                  className="text-xs text-amber-700 dark:text-amber-400"
-                  role="status"
-                  data-testid="branch-summary-fallback"
-                >
-                  {t(SUMMARY_FALLBACK_KEYS[summaryFallback])}
-                </p>
-              ) : null}
-            </div>
+            <ConversationSummaryEditor
+              label={t("summary.previewLabel")}
+              text={summaryText}
+              onTextChange={summary.setText}
+              generating={generating}
+              fallback={summary.fallback}
+              onRegenerate={() => void generateSummary()}
+            />
           )}
         </div>
 

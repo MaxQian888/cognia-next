@@ -430,6 +430,18 @@ export function ImageLightbox({
   const t = useTranslations("chat.renderers.image")
   const reduceMotion = useReducedMotion() ?? false
   const safeIndex = clampIndex(activeIndex, items.length)
+  const thumbnailStripRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    // The portal and motion refs settle after the first commit. Read the
+    // active DOM item in the next frame, and cancel stale navigation/close work.
+    const frame = requestAnimationFrame(() => {
+      thumbnailStripRef.current
+        ?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')
+        ?.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [open, safeIndex, items.length])
   const activeItem = items[safeIndex]
   const adjacentIndex = safeIndex < items.length - 1 ? safeIndex + 1 : safeIndex - 1
   const adjacentItem = adjacentIndex >= 0 ? items[adjacentIndex] : undefined
@@ -450,7 +462,7 @@ export function ImageLightbox({
         className="h-[min(92dvh,900px)] w-[min(96vw,1400px)] max-w-none grid-rows-[minmax(0,1fr)] gap-0 overflow-hidden border-0 bg-black p-0 shadow-2xl"
         showCloseButton={false}
         onCloseAutoFocus={(event) => {
-          if (!returnFocusRef?.current) return
+          if (!returnFocusRef?.current?.isConnected) return
           event.preventDefault()
           returnFocusRef.current.focus()
         }}
@@ -488,7 +500,10 @@ export function ImageLightbox({
           className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 via-black/35 to-transparent px-3 pt-7 pb-2"
           data-testid="image-lightbox-thumbnails"
         >
-          <div className="pointer-events-auto flex items-center justify-center gap-2 overflow-x-auto overscroll-x-contain">
+          <div
+            ref={thumbnailStripRef}
+            className="pointer-events-auto flex items-center [justify-content:safe_center] gap-2 overflow-x-auto overscroll-x-contain"
+          >
             {items.map((item, index) => {
               const active = index === safeIndex
               const name = itemName(item, t("defaultTitle"))

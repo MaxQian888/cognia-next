@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import type { UIMessage } from "ai"
+import { useTranslations } from "next-intl"
 
 import { PerfBoundary } from "@/lib/perf"
 import { estimateMessageHeight } from "@/lib/chat/row-height-estimate"
@@ -41,6 +42,7 @@ export function TranscriptMessageList({
   sessionId,
   messageDisplay: providedMessageDisplay,
 }: TranscriptMessageListProps) {
+  const tTimeline = useTranslations("chat.timeline")
   const fallbackMessageDisplay = useMessageDisplay()
   const messageDisplay = providedMessageDisplay ?? fallbackMessageDisplay
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -124,9 +126,11 @@ export function TranscriptMessageList({
         <div
           ref={scrollRef}
           role="log"
+          aria-label={tTimeline("scrollConversation")}
+          tabIndex={0}
           aria-busy={status === "streaming"}
           data-session-id={sessionId}
-          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="conversation-scroll relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
           onScroll={handleScroll}
         >
           <div

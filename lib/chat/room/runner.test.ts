@@ -305,9 +305,10 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
   const sinks: RoomRunnerSinks = {
     status: {
       get: (id) => status.get(id) ?? "idle",
-      set: (id, next) => {
+      set: (id, next, options) => {
         status.set(id, next)
         statusLog.push(`status:${next}`)
+        if (options?.turnOutcome) statusLog.push(`outcome:${options.turnOutcome}`)
       },
       setError: (id, error) => {
         statusLog.push(`error:${error}`)
@@ -496,6 +497,19 @@ describe("a linear turn", () => {
     expect(w.store.get(ROOM)).toEqual(persisted)
     expect(w.status.get(ROOM)).toBe("idle")
     expect([...w.memberStatus.values()]).toEqual([])
+  })
+
+  it("retains continuation and picked-member provenance on the new room instruction", async () => {
+    const w = createWorld()
+    await w.runner.send("Continue", {
+      sessionId: ROOM,
+      continuationOf: "original",
+      targetMemberIds: ["a"],
+    })
+    expect(w.db.get(ROOM)?.[0].metadata).toMatchObject({
+      continuationOf: "original",
+      targetMemberIds: ["a"],
+    })
   })
 
   it("carries the send's routing plan into each member's run metadata", async () => {
@@ -770,6 +784,7 @@ describe("stopping and steering", () => {
     expect(w.calls.interrupt).toEqual([w.calls.sendPrompt[0].sub])
     expect(w.calls.sendPrompt).toHaveLength(1)
     expect(w.status.get(ROOM)).toBe("idle")
+    expect(w.statusLog).toContain("outcome:interrupted")
     expect(w.drained).toEqual([])
   })
 

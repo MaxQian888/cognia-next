@@ -147,6 +147,7 @@ export const TYPING_POLL_MS = 250
  * the active pane, the RPC arm carries it explicitly. */
 export interface RoomSendOptions {
   sessionId: string
+  continuationOf?: string
   /** Internal admission notification; never supplied by a remote payload. */
   onAccepted?: () => void
   /** Attachment provenance for the optimistic user message. */
@@ -532,6 +533,8 @@ export class RoomRunner {
     if (!skipsUserTurn(opts)) {
       const userMsg = withMetadata(makeUserMessage(content, undefined, opts.attachmentManifest), {
         senderKind: "user",
+        ...(opts.continuationOf ? { continuationOf: opts.continuationOf } : {}),
+        ...(opts.targetMemberIds?.length ? { targetMemberIds: [...opts.targetMemberIds] } : {}),
         ...(opts.templateRun ? { templateRun: opts.templateRun } : {}),
         ...replyMetadata(opts),
         ...referenceMetadata(content, opts),
@@ -782,7 +785,7 @@ export class RoomRunner {
     this.sinks.steer.clear(sessionId)
     this.sinks.steer.armed.delete(sessionId)
     // Release the visible state before waiting for every interrupt ack.
-    this.sinks.status.set(sessionId, "idle")
+    this.sinks.status.set(sessionId, "idle", { turnOutcome: "interrupted" })
     this.sinks.members.clearFor(sessionId)
     this.sinks.members.clearStopRequestsFor(sessionId)
     await this.interruptTurn(sessionId)

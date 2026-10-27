@@ -21,6 +21,26 @@ function Boom(): React.JSX.Element {
 }
 
 describe("RendererErrorBoundary", () => {
+  it("recovers on a new reset key while preserving failure for the same input", () => {
+    const view = render(
+      <RendererErrorBoundary resetKey="broken">
+        <Boom />
+      </RendererErrorBoundary>
+    )
+    view.rerender(
+      <RendererErrorBoundary resetKey="broken">
+        <span>edited</span>
+      </RendererErrorBoundary>
+    )
+    expect(screen.queryByText("edited")).toBeNull()
+    view.rerender(
+      <RendererErrorBoundary resetKey="fixed">
+        <span>edited</span>
+      </RendererErrorBoundary>
+    )
+    expect(screen.getByText("edited")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
   it("renders children when nothing throws", () => {
     render(
       <RendererErrorBoundary>

@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 import { useSettingsStore } from "@/stores/settings"
-import { getSession, updateSession } from "@/lib/db/sessions"
+import { getSession, updateSession, updateSessionAgentModel } from "@/lib/db/sessions"
 import { persistModelSelection } from "@/lib/chat/model-selection"
 import {
   agentHostAvailable,
@@ -74,6 +74,8 @@ import { usePersonAgents } from "@/hooks/chat/use-person-agents"
 import { personDefaultModel, personServedModels } from "@/lib/chat/person-agent-choice"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 import { getProviderDisplayName } from "@/lib/ai/icons"
+import { runtimeRefForSession, useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
+import { useCharacter } from "@/lib/data-hooks/context"
 
 // The reserved group id moved next to the model vocabulary it belongs to, so
 // the send path can recognise a session row this picker stamped. Re-exported
@@ -110,6 +112,7 @@ interface ModelPickerProps {
 
 export function ModelPicker({ session, disabled, className, compactLabel }: ModelPickerProps) {
   const scope = useOptionalChatScope()
+  const character = useCharacter(session?.characterId)
   const t = useTranslations("chat.composer.modelPicker")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
@@ -181,6 +184,8 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   // disagree. It reads the conversation's per-agent choice, never the
   // built-in lane's `model` / `providerOverride`.
   const [optimisticChoice, setOptimisticChoice] = useState<ExternalAgentModelChoice | null>(null)
+  const [externalChoicePersisted, setExternalChoicePersisted] = useState(false)
+  const [externalChoiceSource, setExternalChoiceSource] = useState(session)
   const selection = agentId
     ? resolveExternalAgentModelSelection({
         agentId,
@@ -339,6 +344,15 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   // other: switching Kimi Code back to the built-in agent kept naming the Kimi
   // model until the conversation was reopened.
   const laneKey = `${session?.id ?? ""}\u0000${agentId ?? ""}`
+  const externalSelectionScopeRef = useRef<{ key: string; controller: AbortController } | null>(
+    null
+  )
+  useEffect(() => {
+    const previous = externalSelectionScopeRef.current
+    if (previous?.key === laneKey && !previous.controller.signal.aborted) return
+    previous?.controller.abort()
+    externalSelectionScopeRef.current = { key: laneKey, controller: new AbortController() }
+  }, [laneKey])
   useEffect(
     () => () => {
       selectionSaveRef.current = null
@@ -351,6 +365,7 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
     setOptimisticModel(null)
     setOptimisticProvider(null)
     setOptimisticChoice(null)
+    setExternalChoicePersisted(false)
     setAutoEnablePending(false)
     setSelectionPersisted(false)
   }
@@ -366,6 +381,10 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   ) {
     setOptimisticModel(null)
     setOptimisticProvider(null)
+  }
+  if (externalChoicePersisted && optimisticChoice && session !== externalChoiceSource) {
+    setOptimisticChoice(null)
+    setExternalChoicePersisted(false)
   }
 
   // --- External lane -------------------------------------------------------
@@ -416,7 +435,8 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
           model: appDefault.model,
         })
       : null
-  const selectedModel = optimisticModel ?? (rowIsAgentPick ? undefined : session?.model)
+  const selectedModel =
+    optimisticModel ?? (rowIsAgentPick ? undefined : session?.model) ?? character?.model
   const effectiveModel =
     selectedModel === "auto" && !autoEnabled && !autoEnablePending ? undefined : selectedModel
   const inheritAuto = autoEnabled && autoRouting?.defaultSelection === "auto" && !selectedModel
@@ -434,6 +454,7 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
     : (optimisticProvider ??
       (rowIsAgentPick ? undefined : session?.providerOverride) ??
       memberDefault?.providerOverride ??
+      character?.providerId ??
       appDefault.provider ??
       "anthropic")
 
@@ -448,20 +469,65 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
   const writeAgentChoice = async (next: ExternalAgentModelChoice) => {
     if (!agentId) return
     if (session?.id) {
-      await updateSession(session.id, {
-        externalAgentModels: { ...(session.externalAgentModels ?? {}), [agentId]: next },
-      })
+      await updateSessionAgentModel(session.id, agentId, next)
     } else {
       await saveSettings({
-        externalAgentModelDefaults: { ...(externalAgentModelDefaults ?? {}), [agentId]: next },
+        externalAgentModelDefaults: {
+          ...useSettingsStore.getState().settings?.externalAgentModelDefaults,
+          [agentId]: next,
+        },
       })
     }
   }
 
-  const rollBack = (err: unknown, key: "agentModelSwitchFailed" | "cogniaModelSwitchFailed") => {
-    const msg = err instanceof Error ? err.message : String(err)
-    setOptimisticChoice(null)
-    toast.error(t(key, { reason: msg }))
+  const saveExternalSelection = (
+    next: ExternalAgentModelChoice,
+    key: "agentModelSwitchFailed" | "cogniaModelSwitchFailed",
+    apply?: () => Promise<void>
+  ) => {
+    let scope = externalSelectionScopeRef.current
+    if (!scope || scope.key !== laneKey) return
+    if (scope.controller.signal.aborted) {
+      scope = { key: laneKey, controller: new AbortController() }
+      externalSelectionScopeRef.current = scope
+    }
+    const externalSelectionScope = scope
+    setOptimisticChoice(next)
+    setExternalChoicePersisted(false)
+    setExternalChoiceSource(session)
+    const runtimeKey = JSON.stringify(runtimeRefForSession(session?.id))
+    const unsubscribeRuntime = useAgentRuntimeStore.subscribe(() => {
+      if (JSON.stringify(runtimeRefForSession(session?.id)) !== runtimeKey) {
+        externalSelectionScope.controller.abort()
+      }
+    })
+    const save = persistModelSelection(
+      session?.id ?? null,
+      async () => {
+        await apply?.()
+        externalSelectionScope.controller.signal.throwIfAborted()
+        await writeAgentChoice(next)
+      },
+      externalSelectionScope.controller.signal
+    )
+    void save.then(unsubscribeRuntime, unsubscribeRuntime)
+    selectionSaveRef.current = save
+    void save.then(
+      () => {
+        if (selectionSaveRef.current !== save) return
+        selectionSaveRef.current = null
+        if (session?.id) setExternalChoicePersisted(true)
+        else setOptimisticChoice(null)
+      },
+      (err: unknown) => {
+        if (selectionSaveRef.current !== save) return
+        selectionSaveRef.current = null
+        setOptimisticChoice(null)
+        setExternalChoicePersisted(false)
+        if (externalSelectionScope.controller.signal.aborted) return
+        toast.error(t(key, { reason: err instanceof Error ? err.message : String(err) }))
+      }
+    )
   }
 
   const handleSelectAgentModel = (modelId: string) => {
@@ -469,23 +535,18 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
       // No list means no session of the agent's own to write to: the next turn
       // runs natively on whatever the agent defaults to.
       const next: ExternalAgentModelChoice = { kind: "native" }
-      setOptimisticChoice(next)
-      writeAgentChoice(next).catch((err) => rollBack(err, "agentModelSwitchFailed"))
+      saveExternalSelection(next, "agentModelSwitchFailed")
       return
     }
     const next: ExternalAgentModelChoice = { kind: "native", modelId }
-    setOptimisticChoice(next)
     // The last-known list stands in for an agent with no native session open,
     // so there is nothing live to write to: the pick is recorded and the next
     // native turn applies it.
-    const applied = usingLastNative ? Promise.resolve() : agentModels.select(modelId)
-    applied
-      // Persisted only once the agent accepted it, because the choice is
-      // replayed: `applyModelToSession` re-requests it on every session the
-      // agent opens. Writing first meant a model the agent had refused was
-      // asked for again on every restart, with the chip showing the real one.
-      .then(() => writeAgentChoice(next))
-      .catch((err) => rollBack(err, "agentModelSwitchFailed"))
+    saveExternalSelection(
+      next,
+      "agentModelSwitchFailed",
+      usingLastNative ? undefined : () => agentModels.select(modelId)
+    )
   }
 
   const handleSelectCogniaModel = (providerId: string, modelId: string) => {
@@ -499,10 +560,9 @@ export function ModelPicker({ session, disabled, className, compactLabel }: Mode
         : {}),
     }
     const next: ExternalAgentModelChoice = { kind: "cognia", binding }
-    setOptimisticChoice(next)
     // Nothing to write to the agent now: the next turn starts (or resumes)
     // the gateway task this binding names.
-    writeAgentChoice(next).catch((err) => rollBack(err, "cogniaModelSwitchFailed"))
+    saveExternalSelection(next, "cogniaModelSwitchFailed")
   }
 
   const handleSelect = ({ providerId, modelId }: { providerId: string; modelId: string }) => {

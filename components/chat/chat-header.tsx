@@ -28,7 +28,10 @@ import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
 import { sessionBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
-import { PlatformConversationHeader } from "@/components/inbox/platform-conversation-context"
+import {
+  PlatformConversationHeader,
+  PlatformConversationIdentity,
+} from "@/components/inbox/platform-conversation-context"
 import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
@@ -206,6 +209,7 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         {session.platformBinding && (
           <PlatformBadge platform={session.platformBinding.platform} fullName />
         )}
+        {session.platformBinding && <PlatformConversationIdentity session={session} />}
         {/* Self-hides unless this session was branched from another one. */}
         <BranchLineageChip session={session} />
         {/* The reverse direction: self-hides unless this session HAS branches.
@@ -244,7 +248,9 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
 
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
 
-      {session.platformBinding && <PlatformConversationHeader session={session} />}
+      {session.platformBinding && (
+        <PlatformConversationHeader session={session} showIdentity={false} />
+      )}
 
       {/* `toolbar.right` — in the bar it heads the right chrome, ahead of the
           end-zone items and the actions outlet (the summary controls below). */}

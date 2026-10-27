@@ -242,6 +242,35 @@ describe("FileToolPart row", () => {
     expect(screen.queryByTestId("workbench-review")).toBeNull()
   })
 
+  it("shows a shared run's summary diff stats in place of the edit (ADR-0241)", () => {
+    render(
+      <FileToolPart
+        part={part("tool-Edit", {
+          input: { file_path: "src/a.ts", sharedDiffStats: { added: 3, removed: 1 } },
+          output: "ok",
+        })}
+      />
+    )
+    expect(screen.getByTestId("file-tool-meta")).toHaveTextContent(
+      'result.diff:{"added":3,"removed":1}'
+    )
+  })
+
+  it("names a shared summary patch's files without the patch (ADR-0241)", () => {
+    render(
+      <FileToolPart
+        part={part("tool-apply_patch", {
+          input: { paths: ["src/a.ts"], sharedDiffStats: { added: 2, removed: 0, files: 1 } },
+          output: "ok",
+        })}
+      />
+    )
+    expect(screen.getByTestId("file-tool-part")).toHaveTextContent("src/a.ts")
+    expect(screen.getByTestId("file-tool-meta")).toHaveTextContent(
+      'result.files:{"count":1} · result.diff:{"added":2,"removed":0}'
+    )
+  })
+
   it("shows match/file counts for the search tools", () => {
     const { unmount } = render(
       <FileToolPart

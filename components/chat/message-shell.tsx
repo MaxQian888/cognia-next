@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { BotIcon, CircleAlertIcon, SquareIcon, UserIcon } from "lucide-react"
+import { BotIcon, CircleAlertIcon, InfoIcon, SquareIcon, UserIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -182,10 +182,9 @@ function useMessageMetadata(
 
 /**
  * The compact run-metadata chip that lives on the right end of the action
- * footer (`message-renderer`). The summary — `external · 5.5s · ↑2.8k ↓15 ·
- * $0.0216` — is itself the answer for most checks; clicking opens a popover
- * with the full per-field list, anchored to the chip so expansion never moves
- * the transcript around it.
+ * footer (`message-renderer`). Keep the message clock and labelled duration
+ * readable; provider, usage and other technical fields live in a popover
+ * anchored to the chip so expansion never moves the transcript around it.
  */
 export function MessageMetaLine({
   message,
@@ -201,7 +200,10 @@ export function MessageMetaLine({
   const t = useTranslations("chat.messageDisplay")
   const { detailRows } = useMessageMetadata(message, display, speakerName)
   if (detailRows.length === 0) return null
-  const summary = detailRows.map((row) => row.value).join(" · ")
+  const summary = detailRows
+    .filter((row) => row.key === "timestamp" || row.key === "duration")
+    .map((row) => (row.key === "duration" ? `${row.label}: ${row.value}` : row.value))
+    .join(" · ")
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -211,14 +213,17 @@ export function MessageMetaLine({
           title={t("details")}
           data-testid="message-meta-line"
           className={cn(
-            "inline-flex h-6 min-w-0 items-center rounded-md px-1.5",
-            "text-[11px] text-muted-foreground transition-colors",
+            "inline-flex h-6 min-w-0 items-center gap-1.5 rounded-md px-1.5",
+            "text-[11px] text-muted-foreground transition-[color,background-color,opacity]",
+            display.actions === "hover" &&
+              "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 data-[state=open]:opacity-100 group-has-[[data-state=open]]:opacity-100",
             "hover:bg-muted/60 hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
             className
           )}
         >
-          <span className="truncate font-mono tabular-nums">{summary}</span>
+          {summary && <span className="truncate font-mono tabular-nums">{summary}</span>}
+          <InfoIcon className="size-3 shrink-0" aria-hidden />
         </button>
       </PopoverTrigger>
       <PopoverContent

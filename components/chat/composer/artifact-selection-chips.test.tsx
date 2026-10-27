@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, act, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 const buildMessageReferenceTextMock = jest.fn()
 jest.mock("@/lib/chat/mentions/message-reference", () => {
@@ -62,12 +63,17 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+jest.mock("@/lib/files/download", () => ({ downloadFile: jest.fn() }))
+
 import { ArtifactSelectionChips } from "./artifact-selection-chips"
 import { ComposerSessionProvider } from "./composer-session-context"
 import { useChatStore } from "@/stores/chat"
+import { wrapUntrustedContent, wrapUntrustedRecord } from "@/lib/web/untrusted-content"
+import { downloadFile } from "@/lib/files/download"
 
 beforeEach(() => {
   act(() => useChatStore.getState().clear())
+  jest.mocked(downloadFile).mockClear()
 })
 
 const sel = (over = {}) => ({
@@ -100,7 +106,7 @@ describe("ArtifactSelectionChips", () => {
   it("removes a chip via its remove button", () => {
     act(() => useChatStore.getState().addContextSelection(sel()))
     render(<ArtifactSelectionChips />)
-    fireEvent.click(screen.getByRole("button"))
+    fireEvent.click(screen.getByRole("button", { name: /removeSelectionAria/ }))
     expect(useChatStore.getState().contextSelections).toHaveLength(0)
   })
 
@@ -665,6 +671,73 @@ describe("excerpt chips", () => {
       'selectionChipExcerptLabel:{"derivation":"summary","title":"Keep the cache warm."}'
     )
   })
+
+  it("opens the complete summary without changing or removing its reference", async () => {
+    const summary = "Full summary body.\nA second paragraph beyond the chip title."
+    act(() =>
+      useChatStore.getState().addContextSelection(
+        excerptSel({
+          snapshot: summary,
+          excerpt: { derivation: "summary", quote: "Original text" },
+        })
+      )
+    )
+    render(<ArtifactSelectionChips />)
+    const user = userEvent.setup()
+    const trigger = screen.getByRole("button", { name: /previewSelectionAria/ })
+    await user.click(trigger)
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveClass("h-[min(85dvh,720px)]", "w-[min(94vw,1200px)]", "gap-0", "p-0")
+    expect(within(dialog).getByRole("heading")).toHaveFocus()
+    expect(within(dialog).getByText(/Full summary body/)).toHaveTextContent("A second paragraph")
+    expect(useChatStore.getState().contextSelections[0].snapshot).toBe(summary)
+    await user.tab()
+    const toolbar = within(dialog).getByRole("toolbar", { name: "previewToolbarAria" })
+    expect(within(toolbar).getByRole("button", { name: "copy" })).toHaveFocus()
+    await user.tab()
+    expect(within(toolbar).getByRole("button", { name: "download" })).toHaveFocus()
+    await user.tab()
+    expect(within(toolbar).getByRole("button", { name: "close" })).toHaveFocus()
+    await user.keyboard("{Escape}")
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(useChatStore.getState().contextSelections).toHaveLength(1)
+    expect(trigger).toHaveFocus()
+  })
+
+  it.each([wrapUntrustedRecord, wrapUntrustedContent])(
+    "previews only the summary body and preserves its model wrapper",
+    async (wrap) => {
+      const summary = "The actual summary.\nKeep this second line exactly."
+      const snapshot = wrap(summary)
+      act(() =>
+        useChatStore
+          .getState()
+          .addContextSelection(
+            excerptSel({ snapshot, excerpt: { derivation: "summary", quote: "Original text" } })
+          )
+      )
+      render(<ArtifactSelectionChips />)
+      const user = userEvent.setup()
+      const writeText = jest.spyOn(navigator.clipboard, "writeText")
+      await user.click(screen.getByRole("button", { name: /previewSelectionAria/ }))
+      const dialog = screen.getByRole("dialog")
+      expect(within(dialog).getByText(/The actual summary/).textContent).toBe(summary)
+      expect(within(dialog).queryByText(/Untrusted.*content below/)).not.toBeInTheDocument()
+      const toolbar = within(dialog).getByRole("toolbar", { name: "previewToolbarAria" })
+      await user.click(within(toolbar).getByRole("button", { name: "copy" }))
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(summary))
+      expect(within(toolbar).getByRole("button", { name: "copied" })).toBeInTheDocument()
+      await user.click(within(toolbar).getByRole("button", { name: "download" }))
+      expect(downloadFile).toHaveBeenLastCalledWith(
+        "Keep the cache warm.txt",
+        summary,
+        "text/plain;charset=utf-8"
+      )
+      expect(useChatStore.getState().contextSelections[0].snapshot).toBe(snapshot)
+      await user.click(within(toolbar).getByRole("button", { name: "close" }))
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    }
+  )
 
   it("counts the messages a selection runs across", () => {
     act(() =>

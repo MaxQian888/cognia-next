@@ -507,25 +507,35 @@ function GenericBottomToolbar({
   // were what squeezed the model chip on a phone. The accessible name and the
   // tooltip keep saying what is wrong.
   const credentialBadge = (glyphForm: boolean) =>
-    session && onBuiltinRuntime ? (
-      <ComposerCredentialBadge onOpenSettings={onOpenProviderSettings} glyph={glyphForm} />
+    session ? (
+      <ComposerCredentialBadge
+        session={session}
+        onOpenSettings={onOpenProviderSettings}
+        glyph={glyphForm}
+      />
     ) : null
 
-  const contextChip = (ringOnlyForm: boolean) => (
-    <ContextUsageIndicator
-      modelId={modelId}
-      providerId={providerId}
-      // Native runtime reports win over its catalog. A Cognia selection owns
-      // the next request's window even while the last reply used another model.
-      maxTokens={agentContextWindow?.maxTokens}
-      selectedModelContextWindow={
-        agentContextWindow?.source === "cognia" ? (agentContextWindow.maxTokens ?? null) : undefined
-      }
-      sdkUsage={sdkUsage}
-      ringOnly={ringOnlyForm}
-      triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5 has-[>svg]:px-1.5")}
-    />
-  )
+  // No session, no window to measure: the welcome composer has no
+  // conversation yet, and the chat store's messages there still belong to
+  // whichever conversation was open last, so the ring would read its usage.
+  const contextChip = (ringOnlyForm: boolean) =>
+    session ? (
+      <ContextUsageIndicator
+        modelId={modelId}
+        providerId={providerId}
+        // Native runtime reports win over its catalog. A Cognia selection owns
+        // the next request's window even while the last reply used another model.
+        maxTokens={agentContextWindow?.maxTokens}
+        selectedModelContextWindow={
+          agentContextWindow?.source === "cognia"
+            ? (agentContextWindow.maxTokens ?? null)
+            : undefined
+        }
+        sdkUsage={sdkUsage}
+        ringOnly={ringOnlyForm}
+        triggerClassName={cn(TOOLBAR_CHIP, "shrink-0 px-1.5 has-[>svg]:px-1.5")}
+      />
+    ) : null
 
   // One captioned row per folded control — see `ToolbarMenuRow`. A row whose
   // control renders nothing (no session, no presets, no plugin contributions)

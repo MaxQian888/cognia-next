@@ -77,6 +77,48 @@ describe("useChatStore", () => {
     useChatStore.getState().clear()
   })
 
+  it("records interruption on the owning user turn and preserves it through stale frames", async () => {
+    const chat = useChatStore.getState()
+    chat.replaceSessionMessages("resume-a", [msg("u1")])
+    chat.replaceSessionMessages("resume-b", [msg("u2")])
+    chat.setSessionStatus("resume-a", "streaming")
+    chat.setSessionStatus("resume-a", "idle", { turnOutcome: "interrupted" })
+    chat.setSessionStatus("resume-a", "idle")
+    chat.replaceSessionMessages("resume-a", [msg("u1")])
+    expect(useChatStore.getState().sessions["resume-a"].messages[0].metadata).toMatchObject({
+      chatTurnOutcome: { state: "interrupted", revision: 2, retryable: true },
+    })
+    expect(useChatStore.getState().sessions["resume-b"].messages[0].metadata).toBeUndefined()
+    chat.setSessionStatus("resume-a", "streaming")
+    chat.setSessionStatus("resume-a", "idle")
+    expect(useChatStore.getState().sessions["resume-a"].messages[0].metadata).toMatchObject({
+      chatTurnOutcome: { state: "completed", revision: 4 },
+    })
+    await Promise.resolve()
+  })
+
+  it("does not relabel a completed turn when a later draft fails before admission", () => {
+    const chat = useChatStore.getState()
+    chat.replaceSessionMessages("resume-a", [msg("u1")])
+    chat.setSessionStatus("resume-a", "streaming")
+    chat.setSessionStatus("resume-a", "idle")
+    chat.setSessionError("resume-a", "Network unavailable before the next draft was sent")
+    expect(useChatStore.getState().sessions["resume-a"].messages[0].metadata).toMatchObject({
+      chatTurnOutcome: { state: "completed" },
+    })
+  })
+
+  it("settles the admitted anchor when a later user message is already queued", () => {
+    const chat = useChatStore.getState()
+    chat.replaceSessionMessages("queued-resume", [msg("running")])
+    chat.setSessionStatus("queued-resume", "streaming", { turnMessageId: "running" })
+    chat.replaceSessionMessages("queued-resume", [msg("running"), msg("queued")])
+    chat.setSessionStatus("queued-resume", "idle", { turnOutcome: "interrupted" })
+    const messages = useChatStore.getState().sessions["queued-resume"].messages
+    expect(messages[0].metadata).toMatchObject({ chatTurnOutcome: { state: "interrupted" } })
+    expect(messages[1].metadata).toBeUndefined()
+  })
+
   it("retains embedded panes without selecting or adding navigation tabs", () => {
     const store = useChatStore.getState()
     store.setActiveSession("main")
@@ -1856,6 +1898,56 @@ describe("steer queue + run timing", () => {
 })
 
 describe("runId + tool timestamps", () => {
+  it("owns PiP run boundaries and terminal state without a mounted chat", () => {
+    const pip =
+      require("@/lib/automation/computer-use-pip") as typeof import("@/lib/automation/computer-use-pip")
+    pip.clearComputerUsePipState()
+    useChatStore.getState().setSessionStatus("background-pip", "streaming")
+    const activity = pip.publishComputerUseActivity(
+      "background-pip",
+      "get_app_state",
+      undefined,
+      undefined,
+      null,
+      { id: "app" }
+    )
+    expect(pip.getComputerUsePipSnapshot("background-pip", "app").runId).toBe(1)
+    useChatStore.getState().setSessionStatus("background-pip", "idle")
+    expect(pip.getComputerUsePipSnapshot("background-pip", "app").ended).toBe(true)
+    useChatStore.getState().setSessionStatus("background-pip", "streaming")
+    pip.publishComputerUsePipFrame(
+      "background-pip",
+      { output: "OLD", width: 80, height: 60 },
+      activity
+    )
+    expect(pip.getComputerUsePipSnapshot("background-pip", "app")).toMatchObject({
+      runId: 2,
+      frame: null,
+    })
+    pip.clearComputerUsePipState()
+  })
+  it("invalidates PiP callbacks when an unretained chat is closed", () => {
+    const pip =
+      require("@/lib/automation/computer-use-pip") as typeof import("@/lib/automation/computer-use-pip")
+    useChatStore.getState().setSessionStatus("closed-pip", "streaming")
+    const activity = pip.publishComputerUseActivity("closed-pip", "get_app_state")
+    useChatStore.getState().closeSession("closed-pip")
+    pip.publishComputerUseActivity("closed-pip", "get_app_state", { ok: true }, activity)
+    expect(pip.getComputerUsePipSnapshot("closed-pip").action).toBeNull()
+    pip.clearComputerUsePipState()
+  })
+  it("clears PiP state and late callbacks on account/session reset while retaining the device preference", () => {
+    const pip =
+      require("@/lib/automation/computer-use-pip") as typeof import("@/lib/automation/computer-use-pip")
+    useChatStore.getState().setSessionStatus("reset-pip", "streaming")
+    const activity = pip.publishComputerUseActivity("reset-pip", "get_app_state")
+    pip.setComputerUsePipAlwaysHidden(true)
+    useChatStore.getState().clear()
+    pip.publishComputerUseActivity("reset-pip", "get_app_state", { ok: true }, activity)
+    expect(pip.getComputerUsePipSnapshot("reset-pip").action).toBeNull()
+    expect(pip.getComputerUsePipAlwaysHidden()).toBe(true)
+    pip.clearComputerUsePipState()
+  })
   const { useSessionRunId, makeSessionSlice } =
     require("./chat-store") as typeof import("./chat-store")
 

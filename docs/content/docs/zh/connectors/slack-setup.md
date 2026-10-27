@@ -116,3 +116,7 @@ cognia-next 会根据所选传输方式，通过 Socket Mode 连接 Slack，或�
 - **Events API Webhook**：当桌面隧道把 connectors server 暴露为公网 HTTPS URL 时可用。Rust webhook handler 会先验证 Slack HMAC 签名，再把事件交给适配器。
 - **正在输入指示器**：Slack 的 `assistant.threads.setStatus` 仅限于 Slack Assistant 应用使用。标准机器人适配器不支持正在输入指示器。
 - **文件上传**：Slack 出站会通过 `chat.postMessage` 以超链接形式发送文件段。通过 Slack 文件 API 进行原生上传仍是后续工作。
+
+## 头像
+
+发送者资料需要 `users:read`，通过单聊会话确定对方还需要 `im:read`。Cognia 的 OAuth 流程会申请这两项权限。现有安装增加权限后需重新安装或重新授权；代码更新不会扩展已签发 token 的权限。头像不需要邮箱权限，也不需要私有频道或多人私聊的历史记录权限。没有资料图片的普通频道保留占位头像。参见 [users.info](https://docs.slack.dev/reference/methods/users.info/) 和 [conversations.info](https://docs.slack.dev/reference/methods/conversations.info/)。

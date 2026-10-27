@@ -1,6 +1,7 @@
 "use client"
 
 import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { mergeInboundMessagesForStream } from "@/lib/connectors/inbound-stored-parts"
 import { startTransition } from "react"
 import {
   applySdkEvent,
@@ -159,11 +160,13 @@ async function settleChatTranscript(
   // render as "running" forever, across every reload. Close those as
   // interrupted in the slice and in the transcript written below.
   let messages = terminalMessages
+    ? mergeInboundMessagesForStream(terminalMessages, sliceMessages(sessionId))
+    : undefined
   if (outcome === "failed" && messages && hasOpenToolParts(messages)) {
     messages = closeOpenToolParts(messages).messages
-    if (useChatStore.getState().sessions[sessionId]) {
-      useChatStore.getState().replaceSessionMessages(sessionId, messages)
-    }
+  }
+  if (messages && messages !== terminalMessages && useChatStore.getState().sessions[sessionId]) {
+    useChatStore.getState().replaceSessionMessages(sessionId, messages)
   }
   const settled = await settleChatTurnForSession(sessionId, {
     outcome,
@@ -568,24 +571,21 @@ export async function handleEvent(
     case "sdk_session_id": {
       // Persist the SDK conversation id so the next send can pass it as
       // `resumeSessionId` after a sidecar restart or app reload.
-      await setSdkSessionId(evt.sessionId, evt.sdkSessionId).catch((err) => {
+      try {
+        await setSdkSessionId(evt.sessionId, evt.sdkSessionId)
+      } catch (err) {
         console.error("setSdkSessionId failed", err)
-      })
+        return
+      }
       if (!isCurrentEvent()) return
       const options = useChatStore.getState().lastSendBySession[evt.sessionId]?.options
       const turnId = (evt as typeof evt & { turnId?: string }).turnId
-      const runtime =
-        evt.runtimeAdapter ??
-        options?.execution?.runtimeAdapter ??
-        (options?.provider && options.provider !== "anthropic" ? "ai-sdk" : "claude-agent-sdk")
-      const initializedGeneration =
-        evt.runtimeAdapter === "ai-sdk" ? frame.transcriptInvalidationId : undefined
+      const initializedGeneration = frame.transcriptInvalidationId
       if (
-        runtime === "ai-sdk" &&
-        (initializedGeneration ||
-          (options?.transcriptInvalidationId &&
-            typeof turnId === "string" &&
-            turnId === options.turnId))
+        initializedGeneration ||
+        (options?.transcriptInvalidationId &&
+          typeof turnId === "string" &&
+          turnId === options.turnId)
       ) {
         await acknowledgeTranscriptRuntime(
           evt.sessionId,
@@ -1147,10 +1147,12 @@ export async function handleEvent(
       // keeps the same in-flight mirror as an open pane, so its writes can
       // ride the debounced persist path; the mirror is dropped once the turn
       // has been durably persisted.
-      const current = isOpen
+      const base = isOpen
         ? (messagesMirrorRef.current.get(sessionId) ?? sliceMessages(sessionId))
         : (messagesMirrorRef.current.get(sessionId) ?? (await listMessages(sessionId)))
       if (!isCurrentEvent()) return
+      const current = isOpen ? mergeInboundMessagesForStream(base, sliceMessages(sessionId)) : base
+      if (current !== base) messagesMirrorRef.current.set(sessionId, current)
 
       // Track assistant tool_use blocks so the post-tool hook can correlate
       // `tool_result_review` events with the call's name + input.
@@ -1425,6 +1427,11 @@ export async function handleEvent(
       }
 
       if (!isCurrentEvent()) return
+      // Connector ingress can commit while the async source/metadata work above
+      // is pending. Retain that canonical row at this event's final boundary.
+      if (isOpen) {
+        nextMessages = mergeInboundMessagesForStream(nextMessages, sliceMessages(sessionId))
+      }
       if (nextMessages !== current) {
         const currentAssistant = [...current]
           .reverse()

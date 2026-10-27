@@ -53,7 +53,15 @@ describe("MessageShell", () => {
     expect(screen.queryByRole("time")).toBeNull()
     // Still one hover away, in the footer's meta chip.
     const meta = screen.getByTestId("message-meta-line")
-    expect(meta).toHaveTextContent("claude-sonnet-4-6")
+    expect(meta.className).toContain("opacity-0")
+    expect(meta.className).toContain("group-hover:opacity-100")
+    expect(meta.className).toContain("group-focus-within:opacity-100")
+    expect(meta.className).toContain("group-has-[[data-state=open]]:opacity-100")
+    expect(meta.className).toContain("focus-visible:opacity-100")
+    expect(meta.className).toContain("pointer-coarse:opacity-100")
+    expect(meta.className).toContain("data-[state=open]:opacity-100")
+    expect(meta).toHaveTextContent("Duration: 1s")
+    expect(meta).not.toHaveTextContent("claude-sonnet-4-6")
     expect(meta).not.toHaveTextContent("Assistant")
   })
 
@@ -564,16 +572,19 @@ describe("MessageMetaLine", () => {
   it("renders the run summary on one line and the field list in a popover", () => {
     render(<MessageMetaLine message={message} display={resolveMessageDisplayOptions()} />)
     const chip = screen.getByTestId("message-meta-line")
-    // Balanced puts provider/duration/usage/cost/finishState under "details" —
-    // the summary line is those values joined, not a labelled table.
-    expect(chip).toHaveTextContent("anthropic")
-    expect(chip).toHaveTextContent("$0.0123")
+    // The footer keeps the clock and a labelled duration; technical metadata
+    // remains reachable without crowding every message's reading surface.
+    expect(chip).toHaveTextContent("Duration: 1s")
+    expect(chip).not.toHaveTextContent("anthropic")
+    expect(chip).not.toHaveTextContent("$0.0123")
     expect(screen.queryByTestId("message-meta-popover")).toBeNull()
 
     fireEvent.click(chip)
     const popover = screen.getByTestId("message-meta-popover")
     expect(popover).toHaveTextContent("↑10 ↓20")
     expect(popover).toHaveTextContent("1s")
+    expect(popover).toHaveTextContent("anthropic")
+    expect(popover).toHaveTextContent("$0.0123")
   })
 
   it("renders nothing when no field is placed under details", () => {

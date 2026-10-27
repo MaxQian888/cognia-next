@@ -134,6 +134,7 @@ const baseRemarkPlugins: RemarkPlugins = [
   ...cjk.remarkPluginsAfter,
 ]
 const mathRemarkPlugins: RemarkPlugins = [...baseRemarkPlugins, remarkMath]
+const untrustedRemarkPlugins: RemarkPlugins = [...baseRemarkPlugins, remarkLimitUntrustedDepth]
 const rehypePlugins: RehypePlugins = [
   rehypeRaw,
   [rehypeSanitize, chatMarkdownSanitizeSchema],
@@ -150,8 +151,31 @@ interface MarkdownAstNode {
   type?: string
   tagName?: string
   value?: string
+  lang?: string
   properties?: Record<string, unknown>
   children?: MarkdownAstNode[]
+}
+
+/** Flatten external nesting before recursive Markdown-to-HTML conversion and React commit. */
+export function limitUntrustedMarkdownDepth(tree: unknown, source: string): void {
+  if (!tree || typeof tree !== "object") return
+  const root = tree as MarkdownAstNode
+  const pending = [{ node: root, depth: 0 }]
+  while (pending.length) {
+    const { node, depth } = pending.pop()!
+    if (depth > 64) {
+      // Preserve the complete source as literal text, rather than truncating
+      // a quote or leaving a deeply nested DOM that cannot be safely unmounted.
+      root.children = [{ type: "code", lang: "text", value: source }]
+      return
+    }
+    for (const child of node.children ?? []) pending.push({ node: child, depth: depth + 1 })
+  }
+}
+
+function remarkLimitUntrustedDepth() {
+  return (tree: unknown, file: { toString(): string }) =>
+    limitUntrustedMarkdownDepth(tree, file.toString())
 }
 
 function markdownNodeText(node: MarkdownAstNode): string {
@@ -316,7 +340,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   // A third party's `$5 and $10` or escaped `\[x\]` is not LaTeX.
   const enableMath = untrusted ? false : requestedMath
-  const remarkPlugins = enableMath ? mathRemarkPlugins : baseRemarkPlugins
+  const remarkPlugins = untrusted
+    ? untrustedRemarkPlugins
+    : enableMath
+      ? mathRemarkPlugins
+      : baseRemarkPlugins
 
   const processedContent = useMemo(() => {
     return enableMath ? preprocessLatex(content) : content

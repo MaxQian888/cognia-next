@@ -21,15 +21,13 @@
 
 import { useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ImageIcon, Loader2Icon, Maximize2Icon } from "lucide-react"
-
+import { DownloadIcon, ImageIcon, Loader2Icon, Maximize2Icon } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  detectDocumentTypeFromFilename,
+  isBinaryDocumentType,
+} from "@cognia/document/support-matrix"
+
+import { Dialog } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -38,7 +36,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AttachmentEmpty } from "@/components/ai-elements/attachments"
 import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
 import { ImageLightbox } from "@/components/chat/renderers/image-lightbox"
-import { IMAGE_MAX_LONG_EDGE } from "@/lib/chat/attachments/dispatch"
+import { formatDocumentText, IMAGE_MAX_LONG_EDGE } from "@/lib/chat/attachments/dispatch"
 import { isVideoDescriptor } from "@/lib/chat/attachments/video/classify"
 import type { NativeVideoVerdict } from "@/lib/chat/attachments/video/delivery-gate"
 import type { VideoPreprocessSettings } from "@/lib/chat/attachments/video/settings"
@@ -48,6 +46,7 @@ import type { StagedAttachmentState } from "./staged-attachment-store"
 import { VideoPreprocessPanel } from "./video-preprocess-panel"
 import { ModelSelect, type ModelSelectChoice } from "@/components/shared/model-select"
 import type { AttachmentMediaOptions } from "@/lib/chat/attachments/media-extraction"
+import { ContextPreviewDialogContent, ContextPreviewDialogHeader } from "./context-preview-dialog"
 
 export interface PreviewTarget {
   id: string
@@ -111,6 +110,12 @@ function RedactedText({ text }: { text: string }) {
 
 export function AttachmentPreviewDialog(props: AttachmentPreviewDialogProps) {
   const t = useTranslations("chat.composer.attachments")
+  const tFile = useTranslations("chat.filePreview")
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
+  const [selectedTab, setSelectedTab] = useState<{ id: string | undefined; value: string } | null>(
+    null
+  )
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [processingModel, setProcessingModel] = useState<ModelSelectChoice>({
     providerId: "",
@@ -150,37 +155,84 @@ export function AttachmentPreviewDialog(props: AttachmentPreviewDialogProps) {
   }, [target, isImage, t])
 
   const displayName = target?.filename ?? t("fallbackName")
+  const originalTabLabel = t(
+    isImage || isMotion || isAudio ? "preview.originalFileTab" : "preview.originalTab"
+  )
+  const hasProcessedView = useMemo(() => {
+    // Media processing controls stay reachable before OCR/transcription/sampling.
+    if (
+      isImage ||
+      isMotion ||
+      isAudio ||
+      state?.status === "extracting" ||
+      state?.status === "rejected" ||
+      state?.processingError ||
+      extracted?.extractedContent?.status === "failed" ||
+      extracted?.extractedContent?.status === "partial"
+    )
+      return true
+    if (!modelText) return false
+    const type = detectDocumentTypeFromFilename(displayName)
+    if (!state?.bytes || type === "unknown" || isBinaryDocumentType(type)) return true
+    const source = new TextDecoder().decode(state.bytes).replace(/\r\n/g, "\n").trim()
+    const processed = modelText.replace(/\r\n/g, "\n").trim()
+    // A filename/fence added by dispatch alone does not warrant a second view.
+    return processed !== source && processed !== formatDocumentText(type, displayName, source)
+  }, [isImage, isMotion, isAudio, state, extracted, modelText, displayName])
+  const requestedTab = selectedTab?.id === target?.id ? selectedTab?.value : props.initialTab
+  const activeTab = hasProcessedView ? (requestedTab ?? "file") : "file"
 
   return (
     <>
       <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-        <DialogContent className="max-h-[85dvh] w-[min(94vw,760px)] max-w-none overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="truncate">{displayName}</DialogTitle>
-            <DialogDescription>
-              {[
-                target?.mediaType || null,
-                state?.sizeBytes ? formatBytesCompact(state.sizeBytes) : null,
+        <ContextPreviewDialogContent
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            titleRef.current?.focus()
+            setSelectedTab(null)
+          }}
+        >
+          <Tabs
+            key={target?.id ?? "none"}
+            value={activeTab}
+            onValueChange={(value) => setSelectedTab({ id: target?.id, value })}
+            className="min-h-0 min-w-0 flex-1 gap-0 overflow-hidden"
+          >
+            <ContextPreviewDialogHeader
+              title={displayName}
+              titleRef={titleRef}
+              description={[
+                state?.sizeBytes ? formatBytesCompact(state.sizeBytes) : target?.mediaType,
                 extracted?.tokens ? t("preview.tokens", { tokens: extracted.tokens }) : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
-            </DialogDescription>
-          </DialogHeader>
-
-          <Tabs
-            key={target?.id ?? "none"}
-            defaultValue={props.initialTab ?? "file"}
-            className="mt-4"
-          >
-            <TabsList>
-              <TabsTrigger value="file">{t("preview.fileTab")}</TabsTrigger>
-              <TabsTrigger value="model">{t("preview.modelTab")}</TabsTrigger>
-            </TabsList>
+              toolbarLabel={t("preview.toolbarAria")}
+            >
+              {hasProcessedView ? (
+                <TabsList variant="line" className="h-8 shrink-0">
+                  <TabsTrigger value="file">{originalTabLabel}</TabsTrigger>
+                  <TabsTrigger value="model">{t("preview.processedTab")}</TabsTrigger>
+                </TabsList>
+              ) : null}
+              <div ref={setToolbarContainer} className="flex items-center gap-0.5" />
+              {target?.url ? (
+                <Button variant="ghost" size="icon-sm" asChild>
+                  <a
+                    href={target.url}
+                    download={displayName}
+                    aria-label={tFile("download", { name: displayName })}
+                    title={tFile("download", { name: displayName })}
+                  >
+                    <DownloadIcon className="size-4" />
+                  </a>
+                </Button>
+              ) : null}
+            </ContextPreviewDialogHeader>
 
             {/* ── The file as a human reads it ─────────────────────────── */}
-            <TabsContent value="file">
-              <ScrollArea className="max-h-[65vh] pr-2">
+            <TabsContent value="file" aria-label={originalTabLabel} className="min-h-0">
+              <ScrollArea className="h-full">
                 {!target?.url ? (
                   <AttachmentEmpty>{t("preview.empty")}</AttachmentEmpty>
                 ) : isVideo ? (
@@ -226,13 +278,16 @@ export function AttachmentPreviewDialog(props: AttachmentPreviewDialogProps) {
                     url={target.url}
                     mediaType={target.mediaType}
                     filename={target.filename}
+                    hideDownloadFallback
+                    presentation="document"
+                    toolbarContainer={toolbarContainer}
                   />
                 )}
               </ScrollArea>
             </TabsContent>
 
             {/* ── The payload the model receives ───────────────────────── */}
-            <TabsContent value="model">
+            <TabsContent value="model" className="flex min-h-0 flex-col overflow-y-auto p-4">
               <p className="mb-2 text-xs text-muted-foreground">{t("preview.modelHint")}</p>
               {(isImage || isMotion || isAudio) && props.onProcessMedia && target ? (
                 <div className="mb-3 space-y-2 rounded-md border p-3">
@@ -331,7 +386,7 @@ export function AttachmentPreviewDialog(props: AttachmentPreviewDialogProps) {
               {state?.extracted?.extractedContent?.status === "partial" ? (
                 <p className="mb-2 text-xs text-amber-600">{t("processing.partial")}</p>
               ) : null}
-              <ScrollArea className="max-h-[60vh] pr-2">
+              <ScrollArea className="min-h-0 flex-1 pr-2">
                 {isMotion && target ? (
                   <VideoPreprocessPanel
                     filename={displayName}
@@ -443,7 +498,7 @@ export function AttachmentPreviewDialog(props: AttachmentPreviewDialogProps) {
               </ScrollArea>
             </TabsContent>
           </Tabs>
-        </DialogContent>
+        </ContextPreviewDialogContent>
       </Dialog>
 
       <ImageLightbox

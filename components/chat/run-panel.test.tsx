@@ -8,6 +8,17 @@ import { RunPanel } from "./run-panel"
 import { useChatStore, makeSessionSlice, type SessionChatSlice } from "@/stores/chat"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useSettingsStore } from "@/stores/settings"
+import { useConversationActivity } from "@/hooks/connectors/use-conversation-activity"
+
+jest.mock("@/hooks/connectors/use-conversation-activity", () => ({
+  useConversationActivity: jest.fn(() => []),
+}))
+jest.mock("@/hooks/connectors/use-conversation-assignment-events", () => ({
+  useConversationAssignmentEvents: () => [],
+}))
+jest.mock("@/components/inbox/conversation-activity-log", () => ({
+  ConversationActivityNotice: () => <p>Historical policy block</p>,
+}))
 
 // Identity i18n with var echo.
 jest.mock("next-intl", () => ({
@@ -49,11 +60,26 @@ function todoPart(todos: unknown[]) {
 }
 
 beforeEach(() => {
+  jest.mocked(useConversationActivity).mockReturnValue([])
   useChatStore.setState({ activeSessionId: null, sessions: {} })
   useSubagentRuntimeStore.setState({ subAgents: {} })
 })
 
 describe("RunPanel — expansion", () => {
+  it("keeps conversation activity collapsed in the composer panel even without an agent run", () => {
+    seed({ status: "idle", messages: [] })
+    jest
+      .mocked(useConversationActivity)
+      .mockReturnValue([{ id: "audit", kind: "inbound.policy_blocked", at: 1, adapterId: "a" }])
+    render(<RunPanel sessionId={SID} conversationKey="onebot:a:group" />)
+    const toggle = screen.getByRole("button", { name: /expand/ })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("Historical policy block")).not.toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(screen.getByText("Historical policy block")).toBeVisible()
+    expect(useConversationActivity).toHaveBeenCalledWith("onebot:a:group")
+  })
+
   it("shows an expand toggle only when the turn has work", () => {
     seed({ status: "streaming", messages: [] })
     const { rerender } = render(<RunPanel sessionId={SID} />)

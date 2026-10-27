@@ -11,6 +11,56 @@ function deferred() {
 }
 
 describe("model selection persistence barrier", () => {
+  it("keeps a pending predecessor when a queued successor is cancelled", async () => {
+    const firstApply = deferred()
+    const events: string[] = []
+    const first = persistModelSelection("cancel-successor", async () => {
+      events.push("first")
+      await firstApply.promise
+    })
+    const controller = new AbortController()
+    const second = persistModelSelection(
+      "cancel-successor",
+      async () => {
+        events.push("cancelled")
+      },
+      controller.signal
+    )
+    const rejected = expect(second).rejects.toThrow("cancel second")
+    controller.abort(new Error("cancel second"))
+    await rejected
+    const third = persistModelSelection("cancel-successor", async () => {
+      events.push("third")
+    })
+    let ready = false
+    const waiting = waitForModelSelection("cancel-successor").then(() => {
+      ready = true
+    })
+    await Promise.resolve()
+    const before = [...events]
+    const readyBeforeFirst = ready
+    firstApply.resolve()
+    await Promise.all([first, third, waiting])
+    expect(before).toEqual(["first"])
+    expect(readyBeforeFirst).toBe(false)
+    expect(events).toEqual(["first", "third"])
+  })
+  it("releases an obsolete lane without waiting for its underlying IPC", async () => {
+    const oldApply = deferred()
+    const controller = new AbortController()
+    const saving = persistModelSelection(
+      "cancelled-lane",
+      () => oldApply.promise,
+      controller.signal
+    )
+    const rejected = expect(saving).rejects.toThrow("runtime changed")
+    controller.abort(new Error("runtime changed"))
+    await rejected
+    await expect(waitForModelSelection("cancelled-lane")).resolves.toBeUndefined()
+    await persistModelSelection("cancelled-lane", async () => undefined)
+    oldApply.resolve()
+  })
+
   it("serializes rapid selections and waits for the latest choice and runtime reset", async () => {
     const first = deferred()
     const reset = deferred()

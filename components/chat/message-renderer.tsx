@@ -26,6 +26,8 @@ import {
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { AsyncQuestionsCard } from "@/components/chat/message-parts/async-questions-card"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
+import { messagePlatformAvatarTarget } from "@/lib/connectors/platform-avatar"
+import { usePlatformAvatar } from "@/hooks/connectors/use-platform-avatar"
 import {
   inboundA2UIBlockCoversParts,
   sanitizeInboundA2UIBlock,
@@ -61,6 +63,7 @@ import { videoAttachmentInfoOfPart } from "@/lib/chat/attachments/video/attachme
 import { MessageImageCollectionProvider } from "@/components/chat/renderers/message-image-collection"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { UnknownPartCard } from "@/components/chat/message-parts/unknown-part-card"
+import { SHARED_WITHHELD_PART_TYPE } from "@/lib/collab/shared-withheld-part"
 import {
   HookNoticeRow,
   type HookNoticePartData,
@@ -250,7 +253,7 @@ import type { RewindFilesResult } from "@/lib/claude/ipc"
  * popup's lifetime.
  */
 export const HOVER_REVEAL_CLASS =
-  "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 has-[[data-state=open]]:opacity-100"
+  "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 has-[[data-state=open]]:opacity-100 group-has-[[data-state=open]]:opacity-100"
 
 interface Props {
   message: UIMessage
@@ -319,7 +322,7 @@ function isSegmentFolded(segment: AgentFlowSegment<unknown>, fold: TurnFold): bo
 }
 
 function MessageRendererInner({
-  message,
+  message: suppliedMessage,
   isStreaming = false,
   isLastAssistant = false,
   actionSheetHost = false,
@@ -332,6 +335,19 @@ function MessageRendererInner({
   projectRoot,
   messageDisplay,
 }: Props) {
+  const tActivity = useTranslations("inbox.activity.kind")
+  const isWithdrawn =
+    (suppliedMessage as { metadata?: Record<string, unknown> }).metadata?.deletedAt !== undefined
+  const message = useMemo(() => {
+    const metadata = (suppliedMessage as { metadata?: Record<string, unknown> }).metadata
+    if (metadata?.deletedAt === undefined) return suppliedMessage
+    const { inboundA2UI: _rich, inboundLabels: _labels, replyTo: _reply, ...kept } = metadata
+    return {
+      ...suppliedMessage,
+      parts: [{ type: "text", text: tActivity("inboundDeleted") }],
+      metadata: kept,
+    } as UIMessage
+  }, [suppliedMessage, tActivity])
   useAgentFileAutoFollow({ parts: message.parts, isStreaming, projectRoot })
   // Re-render when a plugin registers / unregisters a message-part renderer.
   usePluginPartRegistryRevision()
@@ -353,7 +369,8 @@ function MessageRendererInner({
   // Read-aloud is gated on the global TTS toggle; the selector keeps this
   // re-render rare (settings change), not on every playback progress tick.
   const ttsEnabled = useSettingsStore((s) => s.settings?.ttsEnabled ?? false)
-  const [editing, setEditing] = useState(false)
+  const [editingRequested, setEditing] = useState(false)
+  const editing = editingRequested && !isWithdrawn
   const [draft, setDraft] = useState("")
   const [shared, setShared] = useState(false)
   const [richCopied, setRichCopied] = useState(false)
@@ -438,18 +455,27 @@ function MessageRendererInner({
   const resolvedName =
     resolvedSpeaker && !resolvedSpeaker.redacted ? resolvedSpeaker.label : undefined
   const speakerName = resolvedName ?? speaker?.name ?? resolvedSpeaker?.label
+  const platformAvatarTarget = useMemo(() => messagePlatformAvatarTarget(message), [message])
+  const platformAvatarImageUrl = usePlatformAvatar(platformAvatarTarget)
   // The character's own portrait when we have one. Otherwise a colour seeded
   // from the speaker's stable ID rather than its name, because two people in
   // one group really can share a display name, and seeding from the name would
   // hand them the same hue as well as the same label.
-  const speakerAvatar: AvatarSubject | undefined = speaker
-    ? speaker
-    : speakerName
+  const speakerAvatar: AvatarSubject | undefined =
+    platformAvatarTarget && speakerName
       ? {
           name: speakerName,
+          avatarImageUrl: platformAvatarImageUrl,
           ...(resolvedSpeaker ? { avatarColor: deterministicColor(resolvedSpeaker.id) } : {}),
         }
-      : undefined
+      : speaker
+        ? speaker
+        : speakerName
+          ? {
+              name: speakerName,
+              ...(resolvedSpeaker ? { avatarColor: deterministicColor(resolvedSpeaker.id) } : {}),
+            }
+          : undefined
 
   // Segment the parts into tool-activity groups + standalone parts. Memoized on
   // `message.parts` so it doesn't re-run on every token or on unrelated local
@@ -470,9 +496,37 @@ function MessageRendererInner({
         : null,
     [message, promptPreamble]
   )
+  // Validate persisted projections too: older rows may predate the mapper's
+  // shape guard. Withdrawn content never reaches the presentation pipeline.
+  const inboundMetadata = (message as { metadata?: Record<string, unknown> }).metadata
+  const inboundProjection = inboundMetadata?.inboundA2UI
+  const inboundDeletedAt = inboundMetadata?.deletedAt
+  const inboundA2UI = useMemo(() => {
+    if (!inboundProjection || inboundDeletedAt !== undefined) return null
+    return sanitizeInboundA2UIBlock(inboundProjection)
+  }, [inboundProjection, inboundDeletedAt])
+  const isInboundIM =
+    message.role === "user" &&
+    Boolean(
+      message.metadata &&
+      (Object.hasOwn(message.metadata, "platformMessage") ||
+        Object.hasOwn(message.metadata, "inboundA2UI"))
+    )
+  const replyTo = useMemo(() => readReplyTo(message), [message])
   const presentationParts = useMemo(
     () =>
       message.parts.map((part, index) => {
+        // Inbound transport parts are prose/media, never executable tool UI.
+        if (isInboundIM && !["text", "file", "image", "step-start"].includes(part.type)) {
+          return { type: "step-start" } as UIMessage["parts"][number]
+        }
+        if (
+          message.role === "user" &&
+          inboundA2UI &&
+          inboundA2UIBlockCoversParts(inboundA2UI, [part], replyTo?.preview)
+        ) {
+          return { type: "step-start" } as UIMessage["parts"][number]
+        }
         if (promptPreamble && index === promptPreamble.index) {
           return promptPreamble.body.length > 0
             ? ({ ...part, text: promptPreamble.body } as UIMessage["parts"][number])
@@ -482,7 +536,7 @@ function MessageRendererInner({
           ? ({ type: "step-start" } as UIMessage["parts"][number])
           : part
       }),
-    [display, message.parts, promptPreamble]
+    [display, inboundA2UI, isInboundIM, message.parts, message.role, promptPreamble, replyTo]
   )
   const segments = useMemo(
     () => groupAgentParts(presentationParts, agentFlowMode),
@@ -605,27 +659,14 @@ function MessageRendererInner({
   )
 
   // Text of an inbound IM message was written by a third party.
-  const isInboundIM =
-    message.role === "user" &&
-    Boolean((message as { metadata?: { platformMessage?: unknown } }).metadata?.platformMessage)
-
-  // An inbound IM message's platform-native projection (ADR-0009). Shape-
-  // checked here as well as at projection time: rows written before that
-  // guard existed must not be able to throw inside the transcript. A
-  // withdrawn message shows none of its former content.
-  const inboundA2UI = useMemo(() => {
-    const metadata = (message as { metadata?: Record<string, unknown> }).metadata
-    if (!metadata?.inboundA2UI || metadata.deletedAt !== undefined) return null
-    return sanitizeInboundA2UIBlock(metadata.inboundA2UI)
-  }, [message])
   // The plain-text parts are the same message's fallback; when the block
   // already shows all of it, rendering both would print the body twice.
   const inboundA2UICoversParts = useMemo(
     () =>
       inboundA2UI !== null &&
       message.role === "user" &&
-      inboundA2UIBlockCoversParts(inboundA2UI, message.parts),
-    [inboundA2UI, message.role, message.parts]
+      inboundA2UIBlockCoversParts(inboundA2UI, message.parts, replyTo?.preview),
+    [inboundA2UI, message.role, message.parts, replyTo]
   )
 
   // Mention highlighting pattern over known character names. Honor longest
@@ -642,11 +683,13 @@ function MessageRendererInner({
   }, [characterById])
 
   const startEdit = () => {
+    if (isWithdrawn) return
     setDraft(extractText(message))
     setEditing(true)
   }
 
   const submitEdit = () => {
+    if (isWithdrawn) return
     const next = draft.trim()
     if (!next) return
     setEditing(false)
@@ -850,7 +893,6 @@ function MessageRendererInner({
     if (!branchSessionId) return
     useChatStore.getState().setReplyTo(buildReplyTo(message), branchSessionId)
   }, [branchSessionId, message])
-  const replyTo = useMemo(() => readReplyTo(message), [message])
 
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
@@ -996,7 +1038,7 @@ function MessageRendererInner({
         className={cn(
           // ADR-0127: the vertical rhythm between turns follows the chat
           // density surface (`--density-gap`: 0.5 / 0.75 / 1rem).
-          "py-[calc(var(--density-gap,0.75rem)*0.667)] sm:py-[var(--density-gap,0.75rem)]",
+          "py-[calc(var(--density-gap,0.75rem)*0.5)] sm:py-[calc(var(--density-gap,0.75rem)*0.667)]",
           display.layout === "cards"
             ? "max-w-full"
             : display.layout === "bubbles"
@@ -1086,7 +1128,9 @@ function MessageRendererInner({
                     summary={promptPreambleSummary}
                   />
                 ) : null}
-                {inboundA2UI ? <InboundA2UIRenderer block={inboundA2UI} className="mb-2" /> : null}
+                {inboundA2UI ? (
+                  <InboundA2UIRenderer key={message.id} block={inboundA2UI} className="mb-2" />
+                ) : null}
                 {/* ADR-0194: labels plugins attached to an inbound IM message
                     (e.g. laya observe-mode moderation scores). */}
                 <InboundLabelChips
@@ -2180,6 +2224,7 @@ function renderPart(
   }
 
   if (type === "a2ui") {
+    if (untrusted) return null
     return (
       <A2UIPart
         key={key}
@@ -2364,6 +2409,21 @@ function renderPart(
     // Non-blocking agent questions (opt-in: settings.inlineQuestions). The
     // card answers with ordinary user messages via the chat-send bridge.
     return <AsyncQuestionsCard key={key} part={part} sessionId={sessionId} messageId={messageId} />
+  }
+
+  if (type === SHARED_WITHHELD_PART_TYPE) {
+    // A shared run replaced a part its PII gate refused (ADR-0241). It holds
+    // no content: an inert label where the part was, never a control.
+    return (
+      <div
+        key={key}
+        role="note"
+        data-inert="shared-withheld"
+        className="border-muted-foreground/30 text-muted-foreground border-l-2 pl-3 text-xs italic"
+      >
+        {t("sharedWithheld")}
+      </div>
+    )
   }
 
   if (type === "data-commentary") {

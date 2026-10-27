@@ -330,6 +330,7 @@ const persistMessagesMock = jest.fn().mockResolvedValue(undefined)
 const truncateAfterMock = jest.fn().mockResolvedValue(undefined)
 const listMessagesMock = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/db/messages", () => ({
+  updateMessageMetadata: jest.fn(async () => undefined),
   listMessages: (id: string) => listMessagesMock(id),
   persistMessages: (...a: unknown[]) => persistMessagesMock(...a),
   persistStreamingMessages: (...a: unknown[]) => persistMessagesMock(...a),
@@ -5009,7 +5010,9 @@ describe("useClaudeChat — actions", () => {
       action: { kind: "turn.abort" },
     })
     expect(interruptSessionMock).not.toHaveBeenCalled()
-    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle", {
+      turnOutcome: "interrupted",
+    })
   })
 
   it("stop() restores unoffered HostState sends and keeps confirmed messages", async () => {
@@ -5113,7 +5116,9 @@ describe("useClaudeChat — actions", () => {
     })
 
     expect(interruptSessionMock).toHaveBeenCalledWith("sess-1")
-    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle", {
+      turnOutcome: "interrupted",
+    })
     expect(chatState.status).toBe("idle")
 
     acknowledgeInterrupt?.()
@@ -5710,6 +5715,98 @@ describe("useClaudeChat — actions", () => {
       await result.current.regenerate()
     })
     expect(truncateAfterMock).not.toHaveBeenCalled()
+  })
+
+  it.each(["builtin", "external"] as const)(
+    "continues on the previous %s runtime and preserves partial progress",
+    async (kind) => {
+      useAgentRuntimeStore.setState({
+        runtimeRef:
+          kind === "builtin" ? { kind: "external", agentId: "ext-1" } : { kind: "builtin" },
+      })
+      const previousRuntime =
+        kind === "builtin" ? { kind: "builtin" } : { kind: "external", agentId: "ext-1" }
+      chatState.messages = [
+        {
+          id: "original",
+          role: "user",
+          parts: [{ type: "text", text: "Implement it" }],
+          metadata: {
+            continuationRuntime: previousRuntime,
+            chatTurnOutcome: { state: "interrupted", revision: 2, retryable: true },
+          },
+        },
+        { id: "partial", role: "assistant", parts: [{ type: "text", text: "Step one is done" }] },
+      ]
+      listMessagesMock.mockImplementation(async () => chatState.messages)
+      executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "Continued" })
+      const { result } = renderHook(() => useClaudeChat())
+      await flush()
+      await act(async () => {
+        await result.current.send("Continue the interrupted task", undefined, {
+          continuationOf: "original",
+        })
+      })
+      expect(
+        (resolveSendOptionsMock.mock.calls.at(-1)?.[0] as { externalRuntimeId?: string })
+          .externalRuntimeId
+      ).toBe(kind === "external" ? "ext-1" : undefined)
+      expect(chatState.messages.map((message) => message.id)).toEqual(
+        expect.arrayContaining(["original", "partial"])
+      )
+      expect(truncateAfterMock).not.toHaveBeenCalled()
+      if (kind === "external") {
+        expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+          expect.stringContaining("Continue the interrupted task"),
+          expect.objectContaining({ agentId: "ext-1" })
+        )
+        expect(sendPromptMock).not.toHaveBeenCalled()
+      } else {
+        expect(sendPromptMock).toHaveBeenCalledWith(
+          "sess-1",
+          "Continue the interrupted task",
+          expect.any(Object),
+          { transcriptRuntime: "prepared" }
+        )
+        expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+      }
+    }
+  )
+
+  it("refuses a stale continuation after another user turn has arrived", async () => {
+    chatState.messages = [
+      { id: "newer", role: "user", parts: [{ type: "text", text: "New work" }] },
+    ]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("Continue", undefined, { continuationOf: "old" })
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("updates the real user anchor when a delegated turn falls back to builtin", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "builtin" } })
+    chatState.messages = [
+      {
+        id: "original",
+        role: "user",
+        parts: [{ type: "text", text: "Work" }],
+        metadata: {
+          continuationRuntime: { kind: "external", agentId: "ext-1" },
+        },
+      },
+    ]
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("Work", undefined, { skipUserAppend: true, bypassDelegation: true })
+    })
+    expect(chatState.messages[0].metadata).toMatchObject({
+      continuationRuntime: { kind: "builtin" },
+    })
+    expect(sendPromptMock).toHaveBeenCalled()
   })
 
   it("regenerate is a no-op while the session is mid-turn", async () => {
@@ -7282,6 +7379,77 @@ describe("useClaudeChat — agent-trace wiring (Phase B4)", () => {
 describe("useClaudeChat — concurrent sessions", () => {
   const adapterMock = jest.requireMock("@/lib/claude/adapter") as { applySdkEvent: jest.Mock }
 
+  it.each([true, false])(
+    "merges ingress at a queued frame commit while honoring its generation guard (%s)",
+    async (current) => {
+      const events = await import("@/lib/chat/transcript/revision-events")
+      let generationCurrent = true
+      const factory = jest.mocked(events.createTranscriptRuntimeFence).mockImplementation(() => ({
+        capture: async () => ({ shouldPersist: () => generationCurrent }),
+        dispose: jest.fn(),
+      }))
+      const previousRaf = globalThis.requestAnimationFrame
+      const previousCancel = globalThis.cancelAnimationFrame
+      const frames = new Map<number, FrameRequestCallback>()
+      let nextFrame = 0
+      globalThis.requestAnimationFrame = (callback) => {
+        const id = ++nextFrame
+        frames.set(id, callback)
+        return id
+      }
+      globalThis.cancelAnimationFrame = (id) => {
+        frames.delete(id)
+      }
+      let unmount: (() => void) | undefined
+      try {
+        const hook = renderHook(() => useClaudeChat())
+        unmount = hook.unmount
+        await flush()
+        const assistant = {
+          id: "queued-answer",
+          role: "assistant",
+          parts: [{ type: "text", text: "partial" }],
+          metadata: { createdAt: 200 },
+        }
+        adapterMock.applySdkEvent.mockReturnValueOnce({
+          messages: [assistant],
+          turnComplete: false,
+        })
+        await act(async () => {
+          _messageCallback?.({ type: "event", sessionId: "sess-1", event: { type: "assistant" } })
+        })
+        await flush()
+        expect(frames.size).toBeGreaterThan(0)
+
+        const inbound = {
+          id: "ingress-before-frame",
+          role: "user",
+          parts: [{ type: "text", text: "new question" }],
+          metadata: {
+            createdAt: 100,
+            platformMessage: { platform: "onebot", messageId: "remote" },
+          },
+        }
+        // A connector commits after the stream scheduled this frame.
+        chatState.messages = [inbound]
+        generationCurrent = current
+        await act(async () => {
+          const pending = [...frames.values()]
+          frames.clear()
+          pending.forEach((callback) => callback(0))
+        })
+        expect(chatState.messages).toEqual(current ? [inbound, assistant] : [inbound])
+      } finally {
+        unmount?.()
+        globalThis.requestAnimationFrame = previousRaf
+        globalThis.cancelAnimationFrame = previousCancel
+        factory.mockImplementation(
+          jest.requireActual("@/lib/chat/transcript/revision-events").createTranscriptRuntimeFence
+        )
+      }
+    }
+  )
+
   it("does not expose an idle turn until the unchanged final snapshot is durable", async () => {
     chatState.activeSessionId = "sess-1"
     chatState.openSessionIds = ["sess-1"]
@@ -7518,7 +7686,9 @@ describe("useClaudeChat — concurrent sessions", () => {
       await result.current.stop("sess-1")
     })
     expect(interruptSessionMock).toHaveBeenCalledWith("sess-1")
-    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle", {
+      turnOutcome: "interrupted",
+    })
   })
 
   it("send(sessionId) targets the given session's slice", async () => {

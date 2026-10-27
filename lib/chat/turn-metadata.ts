@@ -18,6 +18,8 @@ import type { TurnRoute } from "@/lib/chat/turn-route/types"
 
 /** Metadata assembled before dispatch that must travel with this exact turn. */
 export interface ComposerTurnMetadata {
+  /** A new instruction continuing this interrupted user turn, preserving its runtime. */
+  continuationOf?: string
   webSearchContext?: SendOptions["webSearchContext"]
   /** The message this turn answers (ADR-0177 batch 2). */
   replyTo?: MessageReplyTo
@@ -56,7 +58,12 @@ export interface ComposerTurnMetadata {
 /** The send options a turn's metadata maps to, absent keys omitted. */
 export type TurnMetadataSendOptions = Pick<
   ComposerTurnMetadata,
-  "webSearchContext" | "replyTo" | "targetMemberIds" | "promptPreamble" | "citations"
+  | "webSearchContext"
+  | "replyTo"
+  | "targetMemberIds"
+  | "promptPreamble"
+  | "citations"
+  | "continuationOf"
 > & {
   /** `route`, under the name the send path's call options use. */
   turnRoute?: TurnRoute
@@ -67,6 +74,7 @@ export function turnMetadataSendOptions(
   turnMetadata: ComposerTurnMetadata | undefined
 ): TurnMetadataSendOptions {
   return {
+    ...(turnMetadata?.continuationOf ? { continuationOf: turnMetadata.continuationOf } : {}),
     ...(turnMetadata?.webSearchContext ? { webSearchContext: turnMetadata.webSearchContext } : {}),
     ...(turnMetadata?.replyTo ? { replyTo: turnMetadata.replyTo } : {}),
     ...(turnMetadata?.targetMemberIds && turnMetadata.targetMemberIds.length > 0

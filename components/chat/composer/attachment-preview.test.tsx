@@ -100,7 +100,7 @@ describe("AttachmentPreview — tile rendering", () => {
     expect(screen.getAllByTestId("composer-attachment-chip")).toHaveLength(2)
   })
 
-  it("keeps one row height: media as a landscape thumb, a document as a wider card", () => {
+  it("keeps media as a landscape thumb and documents as compact context cards", () => {
     stage([
       { id: "a", mediaType: "image/png", filename: "pic.png", url: "blob:x" },
       { id: "b", mediaType: "application/pdf", filename: "doc.pdf" },
@@ -109,8 +109,7 @@ describe("AttachmentPreview — tile rendering", () => {
     const [image, document] = screen.getAllByTestId("composer-attachment-chip")
     // 112×80: wider than tall, smaller than the grid variant's square.
     expect(image).toHaveStyle({ width: "7rem", height: "5rem" })
-    // The card has room for its name, size and cost on their own lines.
-    expect(document).toHaveStyle({ width: "13.5rem", height: "5rem" })
+    expect(document).toHaveStyle({ width: "13.5rem", height: "3.5rem" })
   })
 
   it("puts a document's size and cost on its meta line, not on an overlay", () => {
@@ -326,7 +325,7 @@ describe("AttachmentPreview — preview panel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Preview notes\.txt/i }))
     const dialog = screen.getByRole("dialog")
     expect(within(dialog).getByRole("heading", { name: "notes.txt" })).toBeInTheDocument()
-    expect(within(dialog).getByRole("tab", { name: "Model view" })).toBeInTheDocument()
+    expect(within(dialog).getByRole("tab", { name: "Processed" })).toBeInTheDocument()
   })
 
   it("shows the model-visible text, not the raw file, on the model tab", async () => {
@@ -335,7 +334,7 @@ describe("AttachmentPreview — preview panel", () => {
     })
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview notes\.txt/i }))
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByText(/secret body/)).toBeInTheDocument()
   })
 
@@ -345,7 +344,7 @@ describe("AttachmentPreview — preview panel", () => {
     })
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview c\.txt/i }))
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByTestId("redacted-span")).toHaveTextContent("<EMAIL_001>")
     expect(screen.getByTestId("redaction-note")).toBeInTheDocument()
   })
@@ -373,7 +372,7 @@ describe("AttachmentPreview — preview panel", () => {
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview p\.png/i }))
     const dialog = screen.getByRole("dialog")
-    expect(within(dialog).getByRole("tab", { name: "Model view" })).toBeInTheDocument()
+    expect(within(dialog).getByRole("tab", { name: "Processed" })).toBeInTheDocument()
     expect(screen.queryByTestId("image-lightbox-active-image")).not.toBeInTheDocument()
   })
 
@@ -442,7 +441,7 @@ describe("AttachmentPreview — preview panel", () => {
     })
     renderPreview(<AttachmentPreview videoRoute={ROUTE} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview scan\.pdf/i }))
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByText("Nothing was extracted from this file.")).toBeInTheDocument()
   })
 })
@@ -678,7 +677,7 @@ describe("AttachmentPreview — videos", () => {
     stage([clip], { v: readyVideo(videoResult()) })
     renderPreview(<AttachmentPreview videoRoute={{ available: true }} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview clip\.mp4/i }))
-    await user().click(screen.getByRole("tab", { name: "Model view" }))
+    await user().click(screen.getByRole("tab", { name: "Processed" }))
     expect(screen.getByRole("radio", { name: "Original video" })).toBeEnabled()
     await user().click(screen.getByRole("radio", { name: "Frames" }))
     await user().click(screen.getByRole("button", { name: "Apply" }))

@@ -30,6 +30,11 @@ import {
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import type { ChatSession } from "@cognia/agent-config-types"
 
+jest.mock("@/lib/data-hooks/context", () => ({
+  ...jest.requireActual("@/lib/data-hooks/context"),
+  useCharacter: () => undefined,
+}))
+
 // Mock next-intl translations.
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -439,12 +444,12 @@ describe("BottomToolbar — session-kind branching", () => {
     expect(screen.queryByTestId("composition-chip")).toBeNull()
   })
 
-  it("does not apply builtin credential warnings to an external runtime", () => {
+  it("mounts the session-bound credential check on an external runtime", () => {
     agentRuntimeState.runtimeRef = { kind: "external", agentId: "pi" }
     movedControlsVisible = true
     try {
       render(<BottomToolbar session={session} />)
-      expect(screen.queryByTestId("composer-credential-badge")).toBeNull()
+      expect(screen.getByTestId("composer-credential-badge")).toBeInTheDocument()
     } finally {
       movedControlsVisible = false
     }
@@ -1164,6 +1169,13 @@ describe("BottomToolbar — context ring on an agent's lane", () => {
     mockAgentContextWindow = { maxTokens: 1_000_000, source: "cognia" }
     render(<BottomToolbar session={session} />)
     expect(mockContextIndicatorProps.at(-1)?.selectedModelContextWindow).toBe(1_000_000)
+  })
+
+  it("shows no ring without a session (the welcome composer)", () => {
+    // The store's messages there still belong to the last open conversation.
+    render(<BottomToolbar session={null} />)
+    expect(screen.queryByTestId("context-usage-indicator")).toBeNull()
+    expect(mockContextIndicatorProps).toHaveLength(0)
   })
 
   it("leaves the ring on the built-in catalog when no agent window is known", () => {

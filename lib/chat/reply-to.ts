@@ -15,6 +15,7 @@ import {
   type SendContent,
 } from "@cognia/agent-config-types"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
+import { stripInboundDisplayMarkers } from "@/lib/connectors/inbound-stored-parts"
 
 /** The fields a reply needs from the message it targets. */
 export interface ReplyTargetLike {
@@ -28,7 +29,7 @@ export function buildReplyTo(target: ReplyTargetLike): MessageReplyTo {
   // carried references would otherwise quote the opening of the app's context
   // envelope instead of the words being answered.
   const parts = target.parts ? stripPromptPreambleFromParts(target.parts) : target.parts
-  return { messageId: target.id, preview: buildReplyPreview(parts) }
+  return { messageId: target.id, preview: stripInboundDisplayMarkers(buildReplyPreview(parts)) }
 }
 
 /** The reference on a message, or `null` when it is absent or malformed. */
@@ -42,7 +43,7 @@ export function readReplyTo(message: { metadata?: unknown }): MessageReplyTo | n
   if (typeof preview !== "string") return null
   return {
     messageId,
-    preview,
+    preview: stripInboundDisplayMarkers(preview),
     ...(typeof platformMessageId === "string" && platformMessageId ? { platformMessageId } : {}),
   }
 }
@@ -58,7 +59,7 @@ export function parseReplyToPayload(value: unknown): MessageReplyTo | null {
 
 /** The one line a model reads ahead of a reply, so it knows what was answered. */
 export function replyContextLine(replyTo: MessageReplyTo): string {
-  const preview = replyTo.preview.trim()
+  const preview = stripInboundDisplayMarkers(replyTo.preview).trim()
   return preview ? `[Replying to: "${preview}"]` : "[Replying to an earlier message]"
 }
 

@@ -125,6 +125,18 @@ function box() {
   return document.querySelector("[data-composer-layout]") as HTMLElement
 }
 
+it("renders the Resume action with its accessible label and dispatches the continuation", async () => {
+  const input = props({
+    sendButton: { mode: "resume", disabled: false, variant: "default", followUp: null },
+  })
+  render(<ComposerBox {...input} />)
+  const resume = screen.getByRole("button", { name: "ariaResume" })
+  expect(resume.querySelector("svg.lucide-play")).not.toBeNull()
+  await userEvent.click(resume)
+  expect(input.submit).toHaveBeenCalledTimes(1)
+  expect(input.onStop).not.toHaveBeenCalled()
+})
+
 describe("composer notice geometry", () => {
   it.each([
     ["classic", 18, 8],

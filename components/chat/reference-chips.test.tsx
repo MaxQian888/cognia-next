@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { ReferenceChips } from "./reference-chips"
 import { ComposerSessionProvider } from "./composer/composer-session-context"
 import { useChatStore } from "@/stores/chat"
@@ -41,6 +41,15 @@ describe("ReferenceChips", () => {
     render(<ReferenceChips />)
     fireEvent.click(screen.getByRole("button", { name: /src\/a\.ts/ }))
     expect(useChatStore.getState().referencedPaths.map((r) => r.relative)).toEqual(["pkg"])
+  })
+
+  it("preserves the full path as the card title when its visible label truncates", () => {
+    seedRefs()
+    render(<ReferenceChips />)
+    const card = screen.getByTitle("/repo/src/a.ts")
+    expect(card.className).toContain("w-[13.5rem]")
+    expect(card.className).toContain("h-14")
+    expect(within(card).getByRole("button", { name: /src\/a\.ts/ })).toHaveClass("rounded-full")
   })
 
   it("shows the chips of the pane's OWN conversation, not the focused one", () => {

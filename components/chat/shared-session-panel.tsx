@@ -54,6 +54,13 @@ import { Spinner } from "@/components/ui/spinner"
 import { Surface } from "@/components/surface/surface"
 import { authorizeSessionAction } from "@/lib/collab/session-permissions"
 import { convertLocalSessionToShared } from "@/lib/collab/shared-chat-conversion"
+import { shareConversationFromNow } from "@/lib/collab/shared-chat-from-now"
+import {
+  readVisibleSessionMessages,
+  useConversationSummaryDraft,
+} from "@/hooks/chat/use-conversation-summary-draft"
+import { ConversationSummaryEditor } from "@/components/chat/conversation-summary-editor"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   scanSharedTranscriptReferences,
   type SharedTranscriptReference,
@@ -67,6 +74,7 @@ import { getDb } from "@/lib/db/schema"
 import { useChatStore } from "@/stores/chat"
 
 import { SharedSessionFiles } from "./shared-session-files"
+import { SharedToolDetailSetting } from "./shared-tool-detail-setting"
 
 const ROLES: SessionRole[] = ["viewer", "member", "maintainer", "owner"]
 
@@ -172,6 +180,11 @@ export function SharedSessionPanel({
   const canManage = authorizeSessionAction(
     myMembership,
     "session.manageMembers",
+    remote?.policyRevision ?? 0
+  ).allowed
+  const canManageSettings = authorizeSessionAction(
+    myMembership,
+    "session.manageSettings",
     remote?.policyRevision ?? 0
   ).allowed
   const canDelete = authorizeSessionAction(
@@ -333,6 +346,40 @@ export function SharedSessionPanel({
   // Non-null while the embedded-references warning is showing. The refs were
   // scanned at click time; confirming runs the conversion they warned about.
   const [shareWarningRefs, setShareWarningRefs] = useState<SharedTranscriptReference[] | null>(null)
+  // ADR-0241: sharing defaults to a fresh shared branch; the private history
+  // stays private unless the owner explicitly picks "full history".
+  const [shareMode, setShareMode] = useState<"from-now" | "history">("from-now")
+  const [shareAttemptId, setShareAttemptId] = useState(() => crypto.randomUUID())
+  const background = useConversationSummaryDraft({
+    sessionId: session.id,
+    turnLabel: "Shared conversation background",
+    onError: () => toast.error(t("backgroundDraftFailed")),
+  })
+
+  const shareFromNow = async () => {
+    if (!context || !session.projectId || !navigator.onLine) return
+    setLoading(true)
+    try {
+      const text = background.text.trim()
+      const result = await shareConversationFromNow(context.client, {
+        localSessionId: session.id,
+        orgId: context.orgId,
+        workspaceId: session.projectId,
+        attemptId: shareAttemptId,
+        // Nothing is posted unless the owner left text here and pressed start.
+        background: text ? `${t("backgroundHeading")}\n\n${text}` : undefined,
+      })
+      toast.success(t("shareFromNowComplete"))
+      setShareAttemptId(crypto.randomUUID())
+      background.reset()
+      setOpen(false)
+      useChatStore.getState().setActiveSession(result.localSessionId)
+    } catch {
+      toast.error(t("shareFromNowFailed"))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const shareHistory = async () => {
     if (!context || !session.projectId || !navigator.onLine) return
@@ -615,15 +662,66 @@ export function SharedSessionPanel({
             <p className="py-6 text-sm text-muted-foreground">{t("notConfigured")}</p>
           ) : !isShared ? (
             <div className="space-y-4 py-4">
-              <Surface layer="raised" className="rounded-lg border p-3 text-sm">
-                <p className="font-medium">{t("historyWarningTitle")}</p>
-                <p className="mt-1 text-muted-foreground">
-                  {t("historyWarning", {
-                    messages: summary.messages,
-                    attachments: summary.attachments,
-                  })}
-                </p>
-              </Surface>
+              <RadioGroup
+                value={shareMode}
+                onValueChange={(next) => setShareMode(next as "from-now" | "history")}
+                aria-label={t("shareModeLabel")}
+                className="gap-2"
+              >
+                <label className="flex cursor-pointer items-start gap-3 rounded-md border p-2.5 text-sm">
+                  <RadioGroupItem
+                    value="from-now"
+                    className="mt-0.5"
+                    aria-label={t("shareModeFromNow")}
+                  />
+                  <span>
+                    <span className="font-medium">{t("shareModeFromNow")}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t("shareModeFromNowDescription")}
+                    </span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-3 rounded-md border p-2.5 text-sm">
+                  <RadioGroupItem
+                    value="history"
+                    className="mt-0.5"
+                    aria-label={t("shareModeHistory")}
+                  />
+                  <span>
+                    <span className="font-medium">{t("shareModeHistory")}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {t("shareModeHistoryDescription")}
+                    </span>
+                  </span>
+                </label>
+              </RadioGroup>
+              {shareMode === "history" ? (
+                <Surface layer="raised" className="rounded-lg border p-3 text-sm">
+                  <p className="font-medium">{t("historyWarningTitle")}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    {t("historyWarning", {
+                      messages: summary.messages,
+                      attachments: summary.attachments,
+                    })}
+                  </p>
+                </Surface>
+              ) : (
+                <div className="space-y-1 rounded-lg border p-3">
+                  <ConversationSummaryEditor
+                    label={t("backgroundLabel")}
+                    text={background.text}
+                    onTextChange={background.setText}
+                    generating={background.generating}
+                    fallback={background.fallback}
+                    regenerateLabel={background.text ? undefined : t("backgroundDraft")}
+                    onRegenerate={() =>
+                      void background.generate(readVisibleSessionMessages(session.id))
+                    }
+                    rows={5}
+                  />
+                  <p className="text-xs text-muted-foreground">{t("backgroundHint")}</p>
+                </div>
+              )}
               <div className="space-y-2 rounded-lg border p-3">
                 <Label htmlFor="shared-invite-token">{t("inviteToken")}</Label>
                 <Input
@@ -657,14 +755,27 @@ export function SharedSessionPanel({
                   {gateReason(chatGate)}
                 </p>
               ) : null}
-              <Button
-                className="w-full gap-2"
-                disabled={loading || !online || isTeamRoom || !chatGate.canStart}
-                onClick={() => void requestShareHistory()}
-                data-testid="shared-convert-and-share"
-              >
-                <Share2Icon className="size-4" /> {t("convertAndShare")}
-              </Button>
+              {shareMode === "history" ? (
+                <Button
+                  className="w-full gap-2"
+                  disabled={loading || !online || isTeamRoom || !chatGate.canStart}
+                  onClick={() => void requestShareHistory()}
+                  data-testid="shared-convert-and-share"
+                >
+                  <Share2Icon className="size-4" /> {t("convertAndShare")}
+                </Button>
+              ) : (
+                <Button
+                  className="w-full gap-2"
+                  disabled={
+                    loading || background.generating || !online || isTeamRoom || !chatGate.canStart
+                  }
+                  onClick={() => void shareFromNow()}
+                  data-testid="shared-start-from-now"
+                >
+                  <Share2Icon className="size-4" /> {t("startShared")}
+                </Button>
+              )}
             </div>
           ) : (
             <div className="space-y-6 py-4">
@@ -796,6 +907,15 @@ export function SharedSessionPanel({
                     )}
                   </div>
                 ))}
+                {remote && session.collaboration ? (
+                  <SharedToolDetailSetting
+                    client={context.client}
+                    orgId={session.collaboration.orgId}
+                    session={remote}
+                    canChange={canManageSettings}
+                    onChanged={setRemote}
+                  />
+                ) : null}
               </section>
 
               {canReadFiles && session.collaboration ? (

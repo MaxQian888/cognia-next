@@ -25,6 +25,7 @@ import {
   EyeIcon,
   EyeOffIcon,
   InboxIcon,
+  PlayIcon,
   SquareIcon,
 } from "lucide-react"
 
@@ -908,7 +909,9 @@ export function ComposerBox({
                       ? isPreparingAttachments
                         ? tAttach("preparing")
                         : t("ariaSending")
-                      : t("ariaSend")
+                      : sendButton.mode === "resume"
+                        ? t("ariaResume")
+                        : t("ariaSend")
                 }
                 className={actionButtonClass}
                 data-testid={sendButton.mode === "stop" ? "composer-stop" : "composer-send"}
@@ -938,6 +941,8 @@ export function ComposerBox({
                       <SquareIcon className="size-3.5 fill-current" />
                     ) : sendButton.mode === "busy" ? (
                       <Spinner className="size-4" />
+                    ) : sendButton.mode === "resume" ? (
+                      <PlayIcon className="size-4" />
                     ) : (
                       <ArrowUpIcon className="size-4" />
                     )}
@@ -955,7 +960,9 @@ export function ComposerBox({
                   touchInput
                   ? t("stopTooltip")
                   : t("stopTooltipKeyboard")
-                : t("sendTooltip")}
+                : sendButton.mode === "resume"
+                  ? t("resumeTooltip")
+                  : t("sendTooltip")}
           </TooltipContent>
         </Tooltip>
       </div>

@@ -627,7 +627,9 @@ describe("useTeamChat — actions", () => {
       stopPromise = result.current.stop()
     })
 
-    expect(chatState.setSessionStatus).toHaveBeenCalledWith("team-1", "idle")
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("team-1", "idle", {
+      turnOutcome: "interrupted",
+    })
     expect(uiState.clearMemberStatusFor).toHaveBeenCalledWith("team-1")
 
     acknowledgeInterrupt?.()

@@ -6,6 +6,16 @@ import * as ReactForMocks from "react"
 import { render } from "@testing-library/react"
 
 import { ToolDetailBody, isBashToolPart } from "./tool-detail-body"
+jest.mock("@/components/agent/external-agent/goose-session-controls", () => ({
+  GooseChildSessionLink: ({
+    child,
+    chatSessionId,
+  }: {
+    child: { sessionId: string }
+    chatSessionId?: string
+  }) =>
+    ReactForMocks.createElement("button", { "data-session-id": chatSessionId }, child.sessionId),
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
@@ -134,6 +144,26 @@ describe("isBashToolPart", () => {
 })
 
 describe("ToolDetailBody", () => {
+  it("wires a Goose delegate's read-only child link to the owning chat", () => {
+    const { getByRole } = render(
+      <ToolDetailBody
+        sessionId="chat"
+        part={part({
+          type: "tool-delegate",
+          output: "Delegated",
+          toolMetadata: {
+            nativeSubagent: {
+              runtime: "goose",
+              readOnly: true,
+              parentSessionId: "parent",
+              sessionId: "child",
+            },
+          },
+        })}
+      />
+    )
+    expect(getByRole("button", { name: "child" })).toHaveAttribute("data-session-id", "chat")
+  })
   it("routes Bash to the terminal body", () => {
     const { getByTestId } = render(
       <ToolDetailBody part={part({ type: "tool-Bash", input: { command: "ls" } })} />

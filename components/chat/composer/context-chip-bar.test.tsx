@@ -109,13 +109,40 @@ describe("ContextChipBar", () => {
     expect(screen.getByText(".pdf")).toBeInTheDocument()
   })
 
-  // The old implementation summed `estimateDataUrlBytes(f.url)`, which only
-  // understands `data:` URLs — staged files carry `blob:` URLs, so the hint was
-  // permanently 0 and never rendered at all. It now reads real staged sizes.
-  it("shows the size hint for blob-backed attachments", () => {
-    stage([{ id: "a", mediaType: "image/png", filename: "p.png", url: "blob:x" }], 5)
+  it("shows the file size once inside its card without a trailing total", () => {
+    stage([{ id: "a", mediaType: "text/plain", filename: "notes.txt", url: "blob:x" }], 100)
+    mockState.byId.set("a", { ...mockState.byId.get("a")!, sizeBytes: 100 })
     renderBar()
-    expect(screen.getByText("5B")).toBeInTheDocument()
+    expect(screen.getAllByText("100B")).toHaveLength(1)
+  })
+
+  it("gives a long summary, a referenced path and a file the same card dimensions", () => {
+    useChatStore.getState().addContextSelection({
+      kind: "entity",
+      entityKind: "message",
+      entityId: "session#message",
+      title: "A very long summary title that must not stretch its card",
+      snapshot: "The complete summary body",
+      comment: "",
+      capturedAt: 1,
+      excerpt: { derivation: "summary", quote: "Original message" },
+    })
+    useChatStore.getState().addReferencedPath({
+      absolute: "/repo/a-very-long-filename.ts",
+      relative: "a-very-long-filename.ts",
+      isDir: false,
+    })
+    stage([{ id: "doc", mediaType: "text/plain", filename: "notes.txt" }])
+    renderBar()
+    const summary = screen.getByTestId("artifact-selection-chip")
+    const reference = screen.getByTitle("/repo/a-very-long-filename.ts")
+    for (const card of [summary, reference]) {
+      expect(card).toHaveClass("w-[13.5rem]", "h-14")
+    }
+    expect(screen.getByTestId("composer-attachment-chip")).toHaveStyle({
+      width: "13.5rem",
+      height: "3.5rem",
+    })
   })
 
   it("omits the size hint when nothing is staged", () => {

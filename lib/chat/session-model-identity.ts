@@ -24,6 +24,7 @@ import {
 import { getProviderDisplayName } from "@/lib/ai/icons"
 import { resolveModelDisplayName } from "@/lib/ai/model-options"
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import type { Character, ChatSession } from "@cognia/agent-config-types"
 
 export interface SessionModelContext {
@@ -72,18 +73,18 @@ function laneOfRef(ref: AgentRuntimeRef): AgentLane | null {
 /**
  * The external agent a conversation runs on, or `null` for the built-in lane.
  *
- * This device's own record wins. Without one, the conversation's synced link
- * to an agent (`externalAgentSession`, or the legacy provider marker) is
- * better evidence than this device's default lane: a conversation started on
- * the desktop never recorded a lane on the phone. With neither, the device
- * default is what the next turn would run on, which is what the composer chip
- * says too.
+ * Use the same explicit-session > device-default order as chat dispatch.
+ * Retained history can belong to a one-off addressed/delegated turn or to an
+ * Agent the user removed; it does not select the next turn's runtime.
  */
 export function sessionAgentLane(
   session: Pick<ChatSession, "externalAgentSession" | "providerOverride">,
   context: Pick<SessionModelContext, "sessionRuntimeRef" | "defaultRuntimeRef">
 ): AgentLane | null {
-  if (context.sessionRuntimeRef) return laneOfRef(context.sessionRuntimeRef)
+  const runtime = context.sessionRuntimeRef ?? context.defaultRuntimeRef
+  if (runtime) return laneOfRef(runtime)
+  // A history-only caller with no runtime context can still describe an old
+  // transcript. Live lists always supply the device's runtime context.
   const linked =
     session.externalAgentSession?.agentId ?? externalAgentIdFromProviderId(session.providerOverride)
   if (linked) return { agentId: linked }
@@ -119,12 +120,13 @@ export function resolveSessionModelIdentity(
   // The built-in lane. A provider marker left on the row by an earlier agent
   // turn names that agent's model, not one of ours.
   const marked = isExternalAgentProviderId(session.providerOverride)
+  const appDefault = resolveAppDefaultModel(context)
   const configured =
-    (marked ? undefined : session.model) ?? context.character?.model ?? context.defaultModel
+    (marked ? undefined : session.model) ?? context.character?.model ?? appDefault.model
   const providerId =
     (marked ? undefined : session.providerOverride) ??
     context.character?.providerId ??
-    context.defaultProvider ??
+    appDefault.provider ??
     // The last resort names a model, so it names that model's provider too.
     (configured ? undefined : "anthropic")
   return {

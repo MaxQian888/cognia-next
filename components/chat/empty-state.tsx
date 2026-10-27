@@ -659,17 +659,16 @@ export function EmptyChatState({
 
         {headerExtraSlot}
 
-        {/* First screen: hero, composer and chips. With a dashboard below it
-            fills the viewport less a peek of the band, and the column sits on
-            2:3 spacers, the optical centre. Top-aligned, the composer landed
-            in the top third of a tall window while the ragged dashboard
-            filled the rest, so the whole page read top-heavy. With nothing
-            below, the spacers are equal and the column is simply centred. */}
+        {/* First screen: hero, composer and chips. With a dashboard below,
+            the band follows the chips directly and the whole stack sits on
+            2:3 spacers, the optical centre, collapsing to the top once it
+            outgrows the pane. Stretching the first screen to the viewport
+            instead left a screen-tall gap under the chips and pushed the band
+            out of sight. With nothing below, the first screen fills the pane
+            and its own equal spacers simply centre the column. */}
+        {dashboard ? <div aria-hidden className="min-h-0 flex-[2]" /> : null}
         <div
-          className={cn(
-            "relative flex w-full shrink-0 flex-col",
-            dashboard ? "min-h-[calc(100%-3.5rem)]" : "flex-1"
-          )}
+          className={cn("relative flex w-full shrink-0 flex-col", dashboard ? null : "flex-1")}
           data-testid="welcome-first-screen"
         >
           {/* Ambient bloom — texture only, carries no information. Rich style
@@ -684,7 +683,7 @@ export function EmptyChatState({
               className="pointer-events-none absolute left-1/2 top-[48%] size-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/[0.06] blur-3xl"
             />
           ) : null}
-          <div aria-hidden className={cn("min-h-6", dashboard ? "flex-[2]" : "flex-1")} />
+          <div aria-hidden className={cn("min-h-6", dashboard ? null : "flex-1")} />
 
           <motion.div
             className="relative z-10 mx-auto flex w-full max-w-[46rem] flex-col items-center gap-6 px-4 py-4"
@@ -870,7 +869,7 @@ export function EmptyChatState({
               </motion.div>
             ) : null}
           </motion.div>
-          <div aria-hidden className={cn("min-h-6", dashboard ? "flex-[3]" : "flex-1")} />
+          <div aria-hidden className={cn("min-h-6", dashboard ? null : "flex-1")} />
         </div>
 
         {/* The dashboard band: rich recents, then the usage panel. One width
@@ -878,7 +877,7 @@ export function EmptyChatState({
             axis instead of three measures stacked under each other. */}
         {dashboard ? (
           <div
-            className="relative z-10 mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-4 pb-10"
+            className="relative z-10 mx-auto flex w-full max-w-[46rem] shrink-0 flex-col gap-8 px-4 pb-10"
             data-testid="welcome-dashboard"
           >
             {richRecents ? (
@@ -899,6 +898,7 @@ export function EmptyChatState({
             ) : null}
           </div>
         ) : null}
+        {dashboard ? <div aria-hidden className="min-h-0 flex-[3]" /> : null}
       </div>
     )
   }

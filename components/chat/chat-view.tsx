@@ -23,6 +23,8 @@ import { usePlatform } from "@/hooks/use-platform"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { dropUnreadMarker } from "@/lib/chat/unread-marker"
+import { withLiveReply } from "@/lib/chat/transcript/live-turn-view"
+import { useSharedLiveReply } from "@/hooks/chat/use-shared-live-reply"
 import { ChatHeader } from "./chat-header"
 import { ChatSessionGates } from "./chat-session-gates"
 import { useChatPaneRuntime } from "@/hooks/chat/use-chat-pane-runtime"
@@ -864,6 +866,7 @@ export function ChatPane({
   const runStatusBar = (
     <RunStatusBar
       sessionId={boundId}
+      conversationKey={activeSession.platformBinding?.conversationKey}
       onSteerNow={steerNow ? () => void steerNow() : undefined}
       onSteerFlush={steerFlush ? () => void steerFlush() : undefined}
     />
@@ -1020,7 +1023,11 @@ export function ChatPane({
         <ChatSessionGates sessionId={boundId} respondToApproval={runtime.respondToApproval} />
       )}
       {activeSession?.platformBinding && (
-        <PlatformConversationContext session={activeSession} showHeader={!showHeader} />
+        <PlatformConversationContext
+          session={activeSession}
+          showHeader={!showHeader}
+          activityInComposer={activeSession.kind !== "subagent"}
+        />
       )}
       {/* The summary card is anchored to the whole pane below the header.
           Notices stay in the reading column; their height must not move the
@@ -1258,10 +1265,19 @@ function ChatMessages({
   ) => Promise<RewindFilesResult>
   useCompanionTranscript: boolean
 }) {
-  const messages = useSessionVisibleMessages(sessionId)
-  const status = useSessionStatus(sessionId)
+  const storedMessages = useSessionVisibleMessages(sessionId)
+  const storedStatus = useSessionStatus(sessionId)
+  // A shared run another member executes arrives live (ADR-0241): draw its
+  // reply over the stored copy, which lags it by up to 10s.
+  const sharedLive = useSharedLiveReply(useCompanionTranscript ? null : sessionId)
+  const messages = useMemo(
+    () => withLiveReply(storedMessages, sharedLive),
+    [storedMessages, sharedLive]
+  )
+  const status =
+    sharedLive?.state === "streaming" && storedStatus === "idle" ? "streaming" : storedStatus
   useEffect(() => {
-    if (!sessionId || status !== "idle") return
+    if (!sessionId || storedStatus !== "idle") return
     const request = readOnboardingRequest(sessionId)
     if (!request || request.state === "succeeded") return
     let cancelled = false
@@ -1281,7 +1297,7 @@ function ChatMessages({
     return () => {
       cancelled = true
     }
-  }, [messages, sessionId, status])
+  }, [storedMessages, sessionId, storedStatus])
   if (sessionId && useCompanionTranscript) {
     return (
       <CompanionTranscriptMessages

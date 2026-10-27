@@ -102,6 +102,11 @@ describe("<TranscriptTimelineSurface />", () => {
       labels,
     }
     const { rerender } = render(<TranscriptTimelineSurface {...props} />)
+    const log = screen.getByRole("log")
+    expect(log).toHaveClass("conversation-scroll")
+    expect(log).toHaveAttribute("tabindex", "0")
+    expect(log).toHaveAccessibleName()
+    expect(screen.queryByRole("scrollbar")).not.toBeInTheDocument()
     messageRenderMock.mockClear()
     rerender(
       <TranscriptTimelineSurface

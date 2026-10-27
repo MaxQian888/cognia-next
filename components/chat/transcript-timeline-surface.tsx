@@ -142,6 +142,7 @@ function collapsedMessages(item: Extract<TranscriptTimelineItem, { kind: "comple
 }
 
 export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps) {
+  const tTimeline = useTranslations("chat.timeline")
   const scrollRef = useRef<HTMLDivElement>(null)
   const rowCount = props.items.length + (props.liveMessages.length > 0 ? 1 : 0)
   const getItemKey = useCallback(
@@ -186,9 +187,11 @@ export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps)
         <div
           ref={scrollRef}
           role="log"
+          aria-label={tTimeline("scrollConversation")}
+          tabIndex={0}
           aria-busy={props.loading || props.liveStatus === "streaming"}
           data-session-id={props.sessionId}
-          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="conversation-scroll relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
         >
           <div className="mx-auto w-full max-w-[52rem] py-5 sm:py-7">
             {props.error ? (

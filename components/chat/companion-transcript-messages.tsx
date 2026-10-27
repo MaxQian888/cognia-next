@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import type { UIMessage } from "ai"
 import type { Character } from "@cognia/agent-config-types"
@@ -9,11 +10,18 @@ import { SessionMediaProvider } from "@/hooks/chat/session-media-provider"
 import { useTranscriptController } from "@/hooks/chat/use-transcript-controller"
 import { useTranscriptLiveTurn } from "@/hooks/chat/use-transcript-live-turn"
 import { withLiveTurn } from "@/lib/chat/transcript/live-turn-view"
+import { getDb } from "@/lib/db/schema"
+import {
+  refusedHostMessageOf,
+  withoutRefusedHostMessages,
+  isHostEnqueuePlaceholder,
+} from "@/lib/chat/refused-host-message"
 import { useStableCharacterById } from "@/hooks/data/use-stable-character-by-id"
 import { createRemoteTranscriptSource } from "@/lib/chat/transcript/source"
 import { useCharacters } from "@/lib/data-hooks/context"
 import { onTransportChange, transport } from "@/lib/tauri/transport-instance"
 import { TranscriptTimelineSurface } from "./transcript-timeline-surface"
+import { RefusedHostMessages } from "./refused-host-messages"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 import type { MessageDisplayPreferences } from "@/types/appearance"
@@ -72,6 +80,30 @@ export function CompanionTranscriptMessages({
 }: CompanionTranscriptMessagesProps) {
   const t = useTranslations("chat.transcript")
   const transcript = useTranscriptController(sessionId, companionTranscriptSource)
+  const refusedMessages = useLiveQuery(
+    async () => {
+      const db = getDb()
+      const retained = await db.messages
+        .where("sessionId")
+        .equals(sessionId)
+        .filter((message) => refusedHostMessageOf(message) !== null)
+        .sortBy("createdAt")
+      const originals = await db.messages.bulkGet(
+        retained.map((message) => refusedHostMessageOf(message)?.messageId ?? message.id)
+      )
+      return retained.filter(
+        (message, index) =>
+          !originals[index] ||
+          originals[index]?.id === message.id ||
+          isHostEnqueuePlaceholder(
+            originals[index],
+            (message.metadata?.hostState as { actionId?: unknown } | undefined)?.actionId
+          )
+      )
+    },
+    [sessionId],
+    []
+  )
   const characterById = useStableCharacterById(useCharacters())
   const messageDisplay = useMessageDisplay(messageDisplayOverride)
   // A member agent's reply arrives live from the person brain (P6e), never
@@ -89,11 +121,16 @@ export function CompanionTranscriptMessages({
   const view = useMemo(
     () =>
       withLiveTurn({
-        items: transcript.snapshot.items,
+        items: withoutRefusedHostMessages(
+          transcript.snapshot.items,
+          new Set(
+            refusedMessages.map((message) => refusedHostMessageOf(message)?.messageId ?? message.id)
+          )
+        ),
         tail: selectActiveTurnMessages(messages, drawnReply ? "streaming" : status),
         live: drawnReply,
       }),
-    [transcript.snapshot.items, messages, status, drawnReply]
+    [transcript.snapshot.items, messages, status, drawnReply, refusedMessages]
   )
   const liveMessages = view.liveMessages
   const mutableMessageIds = useMemo(
@@ -141,6 +178,7 @@ export function CompanionTranscriptMessages({
           messageDisplay,
         }}
       />
+      <RefusedHostMessages messages={refusedMessages} />
     </SessionMediaProvider>
   )
 }

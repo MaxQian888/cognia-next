@@ -1,14 +1,37 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { StrictMode } from "react"
+import {
+  act,
+  fireEvent,
+  render as renderWithTestingLibrary,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
+import { StrictMode, type ReactElement } from "react"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { useSandboxDesktopStream } from "@/hooks/automation/use-sandbox-desktop-stream"
+import { resetComputerUsePipResources } from "@/lib/automation/computer-use-pip-resources"
+
+function render(ui: ReactElement) {
+  return renderWithTestingLibrary(ui, { wrapper: TooltipProvider })
+}
 
 const settingsGet = jest.fn()
 let mockReducedMotion = false
 
 // The session's bound sandbox desktop, if any (ADR-0234 Phase 1).
-let mockSandboxDesktop: { connectionId: string; enabled: boolean } | null = null
+let mockSandboxDesktop: {
+  connectionId: string
+  enabled: boolean
+  allowStreaming?: boolean
+} | null = null
+let mockTargetDesktop: { connectionId: string; enabled: boolean } | undefined
 const revealSessionPanel = jest.fn()
+jest.mock("@/hooks/automation/use-sandbox-desktop-stream", () => ({
+  useSandboxDesktopStream: jest.fn(() => ({ grant: null, status: "idle", attachFrame: jest.fn() })),
+}))
 jest.mock("@/hooks/automation/use-session-sandbox-desktop", () => ({
-  useSessionSandboxDesktop: () => mockSandboxDesktop,
+  useSessionSandboxDesktop: (_sessionId: string, target?: string | null) =>
+    target ? (mockTargetDesktop ?? mockSandboxDesktop) : mockSandboxDesktop,
 }))
 jest.mock("@/lib/artifacts/reveal", () => ({
   revealSessionPanel: (...args: unknown[]) => revealSessionPanel(...args),
@@ -72,11 +95,125 @@ import {
   publishComputerUseActivity,
   setComputerUsePipRunEnded,
   suppressComputerUsePipForCapture,
+  COMPUTER_USE_PIP_RETENTION_MS,
+  publishComputerUsePipFrame,
 } from "@/lib/automation/computer-use-pip"
 import { makeSessionSlice, useChatStore } from "@/stores/chat"
 import { ComputerUsePictureInPicture, resizeGrowth } from "./computer-use-picture-in-picture"
 
 const SID = "session-1"
+
+it("shows independent target cards and restores a selected hidden target", async () => {
+  for (const id of ["Editor", "Browser"]) {
+    const activity = publishComputerUseActivity(SID, "get_app_state", undefined, undefined, null, {
+      id,
+      label: id,
+    })
+    publishComputerUsePipFrame(SID, { output: id, width: 800, height: 600 }, activity)
+  }
+  render(
+    <div data-computer-use-pip-host>
+      <ComputerUsePictureInPicture sessionId={SID} />
+    </div>
+  )
+  const editor = await screen.findByRole("region", { name: "Editor" })
+  const browser = screen.getByRole("region", { name: "Browser" })
+  expect(within(editor).getByRole("img")).toHaveAttribute("src", "data:image/png;base64,Editor")
+  expect(within(browser).getByRole("img")).toHaveAttribute("src", "data:image/png;base64,Browser")
+  fireEvent.click(within(editor).getByRole("button", { name: /hide picture/i }))
+  expect(screen.queryByRole("region", { name: "Editor" })).not.toBeInTheDocument()
+  expect(screen.getByRole("region", { name: "Browser" })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: /Show preview: Editor/ }))
+  expect(await screen.findByRole("region", { name: "Editor" })).toBeInTheDocument()
+  expect(settingsGet).toHaveBeenCalledTimes(1)
+})
+
+it("keeps the other view when one duplicate view changes chat", async () => {
+  publishComputerUseActivity(SID, "screenshot", {
+    ok: true,
+    output: "FRAME",
+    display_width_px: 800,
+    display_height_px: 600,
+  })
+  const view = render(
+    <>
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    </>
+  )
+  await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(2))
+  view.rerender(
+    <>
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId="other" />
+      </div>
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    </>
+  )
+  expect(screen.getByRole("img")).toHaveAttribute("src", "data:image/png;base64,FRAME")
+})
+
+it("starts with the four most recent targets while keeping every target selectable", async () => {
+  for (let index = 0; index < 8; index++) {
+    const activity = publishComputerUseActivity(SID, "get_app_state", undefined, undefined, null, {
+      id: `app-${index}`,
+      label: `Application ${index + 1}`,
+    })
+    publishComputerUsePipFrame(SID, { output: `FRAME-${index}`, width: 800, height: 600 }, activity)
+  }
+  render(
+    <div data-computer-use-pip-host>
+      <ComputerUsePictureInPicture sessionId={SID} />
+    </div>
+  )
+  await screen.findByRole("region", { name: "Application 8" })
+  expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual([
+    "Application 5",
+    "Application 6",
+    "Application 7",
+    "Application 8",
+  ])
+  expect(
+    within(screen.getByRole("toolbar", { name: "Computer Use previews" })).getAllByRole("button")
+  ).toHaveLength(8)
+  fireEvent.click(screen.getByRole("button", { name: /Show preview: Application 1/ }))
+  expect(await screen.findByRole("region", { name: "Application 1" })).toBeInTheDocument()
+})
+
+it("releases a hidden card's frame pin while keeping its restore control", async () => {
+  publishComputerUseActivity(SID, "screenshot", {
+    ok: true,
+    output: "FRAME",
+    display_width_px: 800,
+    display_height_px: 600,
+  })
+  render(
+    <div data-computer-use-pip-host>
+      <ComputerUsePictureInPicture sessionId={SID} />
+    </div>
+  )
+  await screen.findByRole("img")
+  fireEvent.click(screen.getByRole("button", { name: /hide picture in picture/i }))
+  act(() => {
+    for (let index = 0; index < 9; index++) {
+      publishComputerUseActivity(`background-${index}`, "screenshot", {
+        ok: true,
+        output: `FRAME-${index}`,
+        display_width_px: 800,
+        display_height_px: 600,
+      })
+    }
+  })
+  expect(getComputerUsePipSnapshot(SID).frame).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /show picture in picture/i }))
+  expect(await screen.findByText("Preview unavailable")).toBeInTheDocument()
+})
 
 // jsdom has no coordinate-carrying PointerEvent, so back pointer events with a
 // MouseEvent (which does carry clientX/clientY) and flush inside act().
@@ -96,6 +233,13 @@ function seedStatus(
 }
 
 beforeEach(() => {
+  resetComputerUsePipResources()
+  mockTargetDesktop = undefined
+  ;(useSandboxDesktopStream as jest.Mock).mockReturnValue({
+    grant: null,
+    status: "idle",
+    attachFrame: jest.fn(),
+  })
   mockSandboxDesktop = null
   revealSessionPanel.mockReset()
   window.localStorage.removeItem(COMPUTER_USE_PIP_LAYOUT_STORAGE_KEY)
@@ -133,6 +277,178 @@ describe("resizeGrowth", () => {
 })
 
 describe("ComputerUsePictureInPicture", () => {
+  it("disables enlargement rather than opening an empty dialog for another live desktop without a frame", async () => {
+    mockSandboxDesktop = { connectionId: "configured-a", enabled: true }
+    mockTargetDesktop = { connectionId: "actual-b", enabled: true }
+    seedStatus(SID, "streaming")
+    publishComputerUseActivity(SID, "get_app_state", undefined, undefined, "actual-b")
+    ;(useSandboxDesktopStream as jest.Mock).mockReturnValue({
+      grant: { url: "http://127.0.0.1/live-b", role: "viewer" },
+      status: "open",
+      attachFrame: jest.fn(),
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByTitle("Live Computer Use preview")
+    const enlarge = screen.getByRole("button", { name: "View larger" })
+    expect(enlarge).toBeDisabled()
+    fireEvent.click(enlarge)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(revealSessionPanel).not.toHaveBeenCalled()
+  })
+  it("keeps an opaque Lume binding as a screenshot without opening a different configured desktop", async () => {
+    mockSandboxDesktop = { connectionId: "lume-row", enabled: true, allowStreaming: false }
+    publishComputerUseActivity(
+      SID,
+      "screenshot",
+      { ok: true, output: "FRAME", display_width_px: 800, display_height_px: 600 },
+      undefined,
+      "lume-binding:run-1"
+    )
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByRole("region")
+    expect(screen.queryByRole("button", { name: /open sandbox desktop/i })).toBeNull()
+    expect(revealSessionPanel).not.toHaveBeenCalled()
+    expect(screen.queryByTitle("Live Computer Use preview")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /view larger/i }))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+  it("only shows a live observer for the actual action target and disables it when hidden or ended", async () => {
+    const stream = useSandboxDesktopStream as jest.Mock
+    stream.mockReturnValue({
+      grant: { url: "http://127.0.0.1/view", role: "viewer" },
+      status: "open",
+      attachFrame: jest.fn(),
+    })
+    mockSandboxDesktop = { connectionId: "c1", enabled: true }
+    seedStatus(SID, "streaming")
+    publishComputerUseActivity(SID, "get_app_state", undefined, undefined, "c1")
+    const { rerender } = render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByTitle("Live Computer Use preview")
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Live"))
+    const visibility = jest.spyOn(document, "visibilityState", "get")
+    act(() => {
+      visibility.mockReturnValue("hidden")
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+    await waitFor(() => expect(screen.queryByTitle("Live Computer Use preview")).toBeNull())
+    stream.mockClear()
+    act(() => {
+      publishComputerUsePipFrame(SID, { output: "HIDDEN", width: 800, height: 600 })
+    })
+    expect(stream).not.toHaveBeenCalled()
+    act(() => {
+      visibility.mockReturnValue("visible")
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+    await screen.findByTitle("Live Computer Use preview")
+    expect(stream).toHaveBeenLastCalledWith("c1", true, expect.any(Object))
+    fireEvent.click(screen.getByRole("button", { name: /hide picture in picture/i }))
+    expect(screen.queryByTitle("Live Computer Use preview")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /show picture in picture/i }))
+    expect(stream).toHaveBeenLastCalledWith("c1", true, expect.any(Object))
+    act(() => seedStatus(SID, "idle"))
+    await waitFor(() => expect(stream).toHaveBeenLastCalledWith("c1", false, expect.any(Object)))
+    mockSandboxDesktop = { connectionId: "other", enabled: true }
+    rerender(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    expect(screen.queryByTitle("Live Computer Use preview")).toBeNull()
+    expect(screen.queryByRole("button", { name: /open sandbox desktop/i })).toBeNull()
+  })
+
+  it("shows a translated decode failure and recovers when the image loads", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 800,
+      display_height_px: 600,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    const image = await screen.findByRole("img", { name: /computer use screen/i })
+    fireEvent.error(image)
+    expect(screen.getByText("Preview unavailable")).toBeInTheDocument()
+    expect(image).toHaveClass("opacity-0")
+    fireEvent.load(image)
+    expect(screen.queryByText("Preview unavailable")).toBeNull()
+    expect(image).not.toHaveClass("opacity-0")
+  })
+
+  it("coalesces scroll bursts into one geometry batch", async () => {
+    const callbacks: FrameRequestCallback[] = []
+    const raf = jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callbacks.push(callback)
+      return callbacks.length
+    })
+    publishComputerUseActivity(SID, "get_app_state")
+    render(
+      <div data-computer-use-pip-host>
+        <div data-computer-use-pip-obstacle />
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    await screen.findByRole("region", { name: /computer use/i })
+    act(() => {
+      for (const callback of callbacks.splice(0)) callback(0)
+    })
+    raf.mockClear()
+    const rectangles = HTMLElement.prototype.getBoundingClientRect as jest.Mock
+    rectangles.mockClear()
+    act(() => {
+      for (let i = 0; i < 100; i++) document.dispatchEvent(new Event("scroll"))
+    })
+    expect(raf).toHaveBeenCalledTimes(1)
+    expect(rectangles).not.toHaveBeenCalled()
+    act(() => {
+      callbacks.splice(0).forEach((callback) => callback(0))
+    })
+    expect(rectangles).toHaveBeenCalledTimes(2)
+  })
+
+  it("reuses one image node across continuous frame updates", async () => {
+    publishComputerUseActivity(SID, "screenshot", {
+      ok: true,
+      output: "FIRST",
+      display_width_px: 800,
+      display_height_px: 600,
+    })
+    render(
+      <div data-computer-use-pip-host>
+        <ComputerUsePictureInPicture sessionId={SID} />
+      </div>
+    )
+    const image = await screen.findByRole("img", { name: /computer use screen/i })
+    for (let i = 0; i < 60; i++) {
+      act(() => {
+        publishComputerUseActivity(SID, "screenshot", {
+          ok: true,
+          output: `FRAME-${i}`,
+          display_width_px: 800,
+          display_height_px: 600,
+        })
+      })
+      expect(screen.getByRole("img", { name: /computer use screen/i })).toBe(image)
+    }
+    expect(screen.getAllByRole("img", { name: /computer use screen/i })).toHaveLength(1)
+  })
+
   it("shows the latest computer-use frame and supports hide/restore", async () => {
     publishComputerUseActivity(SID, "screenshot", {
       ok: true,
@@ -158,12 +474,18 @@ describe("ComputerUsePictureInPicture", () => {
   })
 
   it("opens the bound sandbox desktop in the chat dock only when the session has one", async () => {
-    publishComputerUseActivity(SID, "screenshot", {
-      ok: true,
-      output: "FRAME",
-      display_width_px: 1280,
-      display_height_px: 800,
-    })
+    publishComputerUseActivity(
+      SID,
+      "screenshot",
+      {
+        ok: true,
+        output: "FRAME",
+        display_width_px: 1280,
+        display_height_px: 800,
+      },
+      undefined,
+      "c1"
+    )
     const { rerender } = render(
       <div data-computer-use-pip-host>
         <ComputerUsePictureInPicture sessionId={SID} />
@@ -443,7 +765,7 @@ describe("ComputerUsePictureInPicture", () => {
     expect(screen.getByText(/8s ago/i)).toBeInTheDocument()
   })
 
-  it("clears the previous session snapshot when the rendered chat switches", () => {
+  it("preserves the previous session snapshot when another view may still need it", () => {
     publishComputerUseActivity(SID, "screenshot")
     const { rerender } = render(
       <div data-computer-use-pip-host>
@@ -457,7 +779,7 @@ describe("ComputerUsePictureInPicture", () => {
     )
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- read the live singleton
     const { getComputerUsePipSnapshot } = require("@/lib/automation/computer-use-pip")
-    expect(getComputerUsePipSnapshot(SID).action).toBeNull()
+    expect(getComputerUsePipSnapshot(SID).action).toBe("screenshot")
   })
 
   it("does not erase pre-mount activity during React Strict Mode effect replay", async () => {
@@ -481,7 +803,8 @@ describe("ComputerUsePictureInPicture", () => {
     )
   })
 
-  it("clears stale activity after a real pane unmount", async () => {
+  it("retires completed activity after the last pane releases its retention", async () => {
+    jest.useFakeTimers()
     publishComputerUseActivity(SID, "screenshot")
     const view = render(
       <div data-computer-use-pip-host>
@@ -489,10 +812,12 @@ describe("ComputerUsePictureInPicture", () => {
       </div>
     )
     await screen.findByRole("region", { name: /computer use/i })
-
+    act(() => setComputerUsePipRunEnded(SID))
     view.unmount()
-
-    await waitFor(() => expect(getComputerUsePipSnapshot(SID).action).toBeNull())
+    expect(getComputerUsePipSnapshot(SID).action).toBe("screenshot")
+    act(() => jest.advanceTimersByTime(COMPUTER_USE_PIP_RETENTION_MS * 2 + 1))
+    expect(getComputerUsePipSnapshot(SID).action).toBeNull()
+    jest.useRealTimers()
   })
 
   it("removes the surface during capture and restores it after release", async () => {

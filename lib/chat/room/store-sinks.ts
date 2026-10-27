@@ -38,7 +38,10 @@ export function createStoreRoomSinks(): RoomRunnerSinks {
   return {
     status: {
       get: (sessionId) => sessionStatusOf(sessionId),
-      set: (sessionId, status) => useChatStore.getState().setSessionStatus(sessionId, status),
+      set: (sessionId, status, options) =>
+        options
+          ? useChatStore.getState().setSessionStatus(sessionId, status, options)
+          : useChatStore.getState().setSessionStatus(sessionId, status),
       setError: (sessionId, error) => useChatStore.getState().setSessionError(sessionId, error),
     },
     diagnostic: (sessionId, diagnostic) =>

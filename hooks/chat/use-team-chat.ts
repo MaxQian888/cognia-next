@@ -64,6 +64,7 @@ import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 /** Options for a team send. `sessionId` targets a background pane (defaults
  * to the active session). See `RoomSendOptions` for the rest. */
 export interface TeamSendOptions {
+  continuationOf?: string
   attachmentManifest?: readonly AttachmentManifestEntry[]
   /** Template provenance retained only on the user transcript row. */
   templateRun?: ChatTemplateRun
@@ -273,7 +274,7 @@ export function useTeamChat() {
       if (engine.projector) {
         useChatStore.getState().clearSteerQueue(sessionId)
         steerArmed.delete(sessionId)
-        useChatStore.getState().setSessionStatus(sessionId, "idle")
+        useChatStore.getState().setSessionStatus(sessionId, "idle", { turnOutcome: "interrupted" })
         putBack()
         await stopRoomTurn(sessionId).catch((err) => console.error("room_stop failed", err))
         return

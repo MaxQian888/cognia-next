@@ -133,6 +133,7 @@ import {
 import { hostStateActionOfferedHere } from "@/lib/sync/host-state-offered-actions"
 import { restoreWithdrawnToComposer } from "@/lib/chat/restore-withdrawn"
 import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
+import { mergeInboundMessagesForStream } from "@/lib/connectors/inbound-stored-parts"
 import {
   getSession,
   touchSession,
@@ -267,6 +268,13 @@ import {
   useChatStore,
 } from "@/stores/chat"
 import { getExecutionBroker } from "@/lib/execution/broker"
+import {
+  canContinueChat,
+  continuationMessageId,
+  continuationRuntimeOf,
+  lastUserMessage,
+  pickChatContinuationMetadata,
+} from "@/lib/chat/continuation"
 import { slotKeyForTurn } from "@/lib/execution/slot-key"
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
 import {
@@ -1116,10 +1124,12 @@ export function useClaudeChat() {
     () =>
       new SessionCoalescingRegistry({
         onCommit: (sid, msgs) => {
-          useChatStore.getState().replaceSessionMessages(sid, msgs)
+          const chat = useChatStore.getState()
+          const messages = mergeInboundMessagesForStream(msgs, chat.sessions[sid]?.messages ?? [])
+          chat.replaceSessionMessages(sid, messages)
           // Stamp per-tool start/end times off the freshly-committed parts so the
           // Run Panel can show per-tool elapsed (no-op when nothing transitioned).
-          useChatStore.getState().syncToolTimestamps?.(sid, msgs)
+          useChatStore.getState().syncToolTimestamps?.(sid, messages)
         },
         onPersist: (sid, msgs, options) =>
           void persistStreamingMessages(sid, msgs, options).catch((err) =>
@@ -1492,6 +1502,8 @@ export function useClaudeChat() {
          *  don't duplicate the user turn when re-issuing the SDK request. */
         sharedRequest?: { messageId: string; queueItemId: string; takeover?: boolean }
         skipUserAppend?: boolean
+        /** Continue the latest interrupted user turn on the runtime that handled it. */
+        continuationOf?: string
         /** Stable journal batch identity, reserved before automatic result delivery. */
         backgroundDelivery?: { id: string; onAccepted: () => void }
         /**
@@ -1764,7 +1776,37 @@ export function useClaudeChat() {
         rejectSend("project_paused")
         return
       }
-      const turnRoute = callOptions?.turnRoute ?? null
+      const continuationMessages = selectVisibleMessages(
+        store.getState().sessions[sessionId]?.messages ?? [],
+        store.getState().sessions[sessionId]?.activeBranchByGroup ?? {}
+      ).filter(
+        (message) => continuationMessageId(message) !== callOptions?.sharedRequest?.messageId
+      )
+      const continuationSource = callOptions?.continuationOf
+        ? lastUserMessage(continuationMessages)
+        : undefined
+      if (callOptions?.continuationOf) {
+        const slice = store.getState().sessions[sessionId]
+        if (
+          !continuationSource ||
+          (callOptions.sharedRequest && continuationSource
+            ? continuationMessageId(continuationSource)
+            : continuationSource?.id) !== callOptions.continuationOf ||
+          !slice ||
+          !canContinueChat({
+            status: slice.status,
+            messages: [continuationSource],
+            diagnostic: slice.errorDiagnostic,
+            errorMessage: slice.errorMessage,
+            queued: isChatTurnQueued(sessionId),
+          })
+        ) {
+          rejectSend("continuation_no_longer_available")
+          return
+        }
+      }
+      const turnRoute =
+        readTurnRoute(continuationSource?.metadata) ?? callOptions?.turnRoute ?? null
       // An addressed turn that cannot run: refused with the reason, before
       // anything reaches the transcript.
       const refuseRoute = (route: TurnRoute, reason: string, detail?: string): void => {
@@ -1855,6 +1897,16 @@ export function useClaudeChat() {
           callOptions?.citations ?? selectComposerCitedRefs(store.getState(), sessionId)
         )
         const sharedMetadata = {
+          ...(callOptions?.continuationOf
+            ? {
+                continuationOf: continuationSource
+                  ? continuationMessageId(continuationSource)
+                  : callOptions.continuationOf,
+                ...(continuationRuntimeOf(continuationSource?.metadata)
+                  ? { continuationRuntime: continuationRuntimeOf(continuationSource?.metadata) }
+                  : {}),
+              }
+            : {}),
           ...(sharedMentions.length > 0 ? { mentions: sharedMentions } : {}),
           ...(callOptions?.promptPreamble ? { promptPreamble: callOptions.promptPreamble } : {}),
         }
@@ -2151,7 +2203,8 @@ export function useClaudeChat() {
         }
         routeLane = lane
       }
-      let turnLane: AgentRuntimeRef = routeLane?.runtimeRef ?? sessionLane
+      let turnLane: AgentRuntimeRef =
+        routeLane?.runtimeRef ?? continuationRuntimeOf(continuationSource?.metadata) ?? sessionLane
       const isSessionAside =
         session?.kind === "resource-workbench" && session.surfaceBinding?.kind === "session"
       if (isSessionAside && session?.surfaceBinding?.kind === "session") {
@@ -2409,7 +2462,9 @@ export function useClaudeChat() {
             // `skipUserAppend`, and a shared-queue drain is a collaborator's
             // request, not this user's.
             {
-              ...(turnRoute || isSessionAside ? {} : { routerFusionSurface: "chat" as const }),
+              ...(turnRoute || isSessionAside || continuationSource
+                ? {}
+                : { routerFusionSurface: "chat" as const }),
               ...(hostStateForeseen ? { hostState: true } : {}),
               interactive:
                 !callOptions?.sharedRequest &&
@@ -2430,7 +2485,9 @@ export function useClaudeChat() {
                       }
                     })()
                   : { runtimeRef: routeLane.runtimeRef }
-                : undefined
+                : continuationSource
+                  ? { runtimeRef: turnLane }
+                  : undefined
           ))
         if (turnLane.kind !== "builtin" && sendOptions.toolSurface !== "none") {
           await assertExternalRuntimeFeatureSupport(sendOptions)
@@ -2747,6 +2804,14 @@ export function useClaudeChat() {
       // Base off this session's own slice — never the focused projection.
       const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
       let userMsg = makeUserMessage(effectiveContent, frozenTurnId, turnManifest)
+      userMsg = {
+        ...userMsg,
+        metadata: {
+          ...(userMsg.metadata as Record<string, unknown>),
+          continuationRuntime: turnLane,
+          ...(callOptions?.continuationOf ? { continuationOf: callOptions.continuationOf } : {}),
+        },
+      }
       // Structured mention capture: persist the message's inline `@…` tokens
       // as `metadata.mentions: ContextRef[]` so mentions are queryable without
       // regex re-parsing. Known subagent handles resolve to their kind; other
@@ -3184,7 +3249,14 @@ export function useClaudeChat() {
       // Clearing an error also sets idle. Do it before entering the active
       // state so workspace/broker settle subscribers see the actual turn end.
       store.getState().setSessionError(sessionId, null)
-      store.getState().setSessionStatus(sessionId, "streaming")
+      const statusAnchor = callOptions?.sharedRequest
+        ? previousMessages.find(
+            (message) => continuationMessageId(message) === callOptions.sharedRequest!.messageId
+          )?.id
+        : callOptions?.regenerateBranch?.anchorId
+      if (statusAnchor)
+        store.getState().setSessionStatus(sessionId, "streaming", { turnMessageId: statusAnchor })
+      else store.getState().setSessionStatus(sessionId, "streaming")
       if (session?.attachedChild) {
         void markAttachedSessionRunning(sessionId).catch((error) =>
           console.warn("attached session start state failed", error)
@@ -3512,6 +3584,7 @@ export function useClaudeChat() {
         !isSessionAside &&
         !callOptions?.skipUserAppend &&
         !callOptions?.bypassDelegation &&
+        !continuationSource &&
         // An addressed turn already names who answers; a delegation rule
         // re-routing it would override the user's own choice.
         !turnRoute
@@ -3566,6 +3639,31 @@ export function useClaudeChat() {
           : turnRuntimeRef?.kind === "external"
             ? turnRuntimeRef.agentId
             : undefined
+      // Delegation rules resolve after the user row is assembled. Keep the
+      // actual runtime on that anchor so a generic continuation does not
+      // re-evaluate prompt-matching rules and silently change agents.
+      {
+        const anchor = skipAppend ? lastUserMessage(previousMessages) : userMsg
+        const actualRuntime: AgentRuntimeRef = turnRuntimeRef ?? { kind: "builtin" }
+        if (
+          anchor &&
+          JSON.stringify(continuationRuntimeOf(anchor.metadata)) !== JSON.stringify(actualRuntime)
+        ) {
+          const metadata = {
+            ...(anchor.metadata as Record<string, unknown>),
+            continuationRuntime: actualRuntime,
+          }
+          const current = store.getState().sessions[sessionId]?.messages ?? []
+          store.getState().replaceSessionMessages(
+            sessionId,
+            current.map((message) =>
+              message.id === anchor.id ? { ...message, metadata } : message
+            )
+          )
+          const { updateMessageMetadata } = await import("@/lib/db/messages")
+          await updateMessageMetadata(sessionId, anchor.id, { continuationRuntime: actualRuntime })
+        }
+      }
       const adoptionAgentKind = routedExternalAgentId ? "external" : "in-app"
       // Whether this turn runs in THIS webview's standalone (BYOK) engine: no
       // sidecar, no host, and a tool catalog in which nothing opens a file
@@ -5997,6 +6095,12 @@ export function useClaudeChat() {
           sessionId: detail.sessionId,
           skipUserAppend: true,
           sharedRequest: { messageId, queueItemId: next.id, takeover: detail.takeover },
+          ...(typeof pickChatContinuationMetadata(message.metadata)?.continuationOf === "string"
+            ? {
+                continuationOf: pickChatContinuationMetadata(message.metadata)!
+                  .continuationOf as string,
+              }
+            : {}),
         })
       } catch (error) {
         useChatStore
@@ -6299,7 +6403,7 @@ export function useClaudeChat() {
       if (typeof endingRunId === "number") {
         markTaskWorkspaceTurnCancelled(sessionId, endingRunId)
       }
-      chat.setSessionStatus(sessionId, "idle")
+      chat.setSessionStatus(sessionId, "idle", { turnOutcome: "interrupted" })
       chatTurnPerformance.finish(sessionId, "cancelled")
       const finishRun = Promise.all([
         finishDirectChatExecutionRun(sessionId, "cancelled"),

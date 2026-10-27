@@ -6,10 +6,10 @@
 // is left alone (the user can edit/remove the text manually).
 
 import { useTranslations } from "next-intl"
-import { XIcon } from "lucide-react"
+import { FolderIcon, XIcon } from "lucide-react"
 import { useChatStore, useComposerReferencedPaths } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
-import { FileTypeIcon } from "@/components/shared/file-type-icon"
+import { FileTypeBadge } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
 import { useComposerSessionId } from "./composer/composer-session-context"
 
@@ -38,21 +38,25 @@ export function ReferenceChips({ bare = false }: ReferenceChipsProps = {}) {
         <div
           key={r.absolute}
           className={cn(
-            "group flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs"
+            "group relative flex h-14 w-[13.5rem] max-w-full items-center gap-1.5 rounded-xl border bg-card py-1.5 pr-7 pl-1.5 text-xs shadow-xs hover:border-foreground/20"
           )}
           title={r.absolute}
         >
-          <FileTypeIcon path={r.relative} isDir={r.isDir} />
-          <span className="max-w-[min(280px,calc(100vw-6rem))] truncate font-mono">
-            {r.relative}
-          </span>
+          <FileTypeBadge
+            path={r.relative}
+            icon={
+              r.isDir ? <FolderIcon className="size-[18px] text-muted-foreground" /> : undefined
+            }
+            className="size-9"
+          />
+          <span className="min-w-0 truncate font-medium">{r.relative}</span>
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
             aria-label={t("removeAria", { path: r.relative })}
             onClick={() => remove(r.absolute, composerSessionId)}
-            className="size-5 opacity-60 transition-opacity hover:opacity-100"
+            className="absolute top-1 right-1 size-5 rounded-full bg-background/90 p-0 opacity-80 shadow-xs ring-1 ring-border/60 transition-opacity hover:opacity-100 [&>svg]:size-2.5"
           >
             <XIcon className="size-3" />
           </Button>

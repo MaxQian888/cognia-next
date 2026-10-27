@@ -16,11 +16,23 @@ import { contextSelectionIdentity } from "@/lib/chat/mentions/selection-identity
 import type { ContextRef } from "@/lib/chat/mentions/types"
 import type { CarriedPromptPreamble, PromptPreambleSummary } from "@/lib/chat/prompt-preamble"
 import { nextNavEpoch } from "@/lib/ui/nav-epoch"
+import {
+  beginComputerUsePipRun,
+  clearComputerUsePipSession,
+  setComputerUsePipRunEnded,
+} from "@/lib/automation/computer-use-pip"
 import { resolveRootSessionId } from "@/lib/claude/agents/root-session"
 import { useApprovalJournalStore, toPersistedApproval } from "@/stores/agent/approval-journal-store"
 import { IDLE_TIMING, nextRunTiming, type RunTiming } from "@/lib/claude/run-status"
 import { nextToolTimestamps } from "@/lib/claude/run-record"
 import { useMemo, useSyncExternalStore } from "react"
+import {
+  chatTurnOutcomeOf,
+  isRecoverableChatFailure,
+  lastUserMessage,
+  mergeChatTurnMetadata,
+  type ChatTurnOutcomeState,
+} from "@/lib/chat/continuation"
 import { getExecutionBroker, DEFAULT_AI_TURN_LIMIT } from "@/lib/execution/broker"
 import type { ChatStatus, PermissionMode } from "@cognia/plugin-contract/stores/chat/chat-store"
 export type { ChatStatus, PermissionMode } from "@cognia/plugin-contract/stores/chat/chat-store"
@@ -29,6 +41,9 @@ export type { ChatStatus, PermissionMode } from "@cognia/plugin-contract/stores/
 export interface SessionStatusOptions {
   /** Epoch ms the turn actually started (see `setSessionStatus`). */
   startedAt?: number
+  turnOutcome?: ChatTurnOutcomeState
+  retryable?: boolean
+  turnMessageId?: string
 }
 
 /**
@@ -155,6 +170,8 @@ export interface PendingCommandOverrides {
  * SDK event to the slice for `evt.sessionId`.
  */
 export interface SessionChatSlice {
+  /** Anchor of the live turn, independent of later queued user messages. */
+  activeTurnMessageId?: string | null
   /** Transient, turn-owned native prediction; never part of the transcript. */
   promptPrediction?: {
     turnId: string
@@ -542,6 +559,7 @@ function statusPatch(
   if (next === "streaming" && prev.runTiming.startedAt == null) {
     patch.runId = prev.runId + 1
     patch.toolTimestamps = {}
+    beginComputerUsePipRun(id, patch.runId)
   }
   // A live stream supersedes any recorded failure: a banner left over from a
   // dropped/errored attempt must not ride a session that is streaming again.
@@ -550,6 +568,60 @@ function statusPatch(
   if (next === "streaming" && (prev.errorMessage != null || prev.errorDiagnostic != null)) {
     patch.errorMessage = null
     patch.errorDiagnostic = null
+  }
+  const wasBusy = prev.status === "streaming" || prev.status === "awaiting_approval"
+  if (wasBusy && next !== "streaming" && next !== "awaiting_approval") setComputerUsePipRunEnded(id)
+  const latestUser = lastUserMessage(selectVisibleMessages(prev.messages, prev.activeBranchByGroup))
+  const anchorId = opts?.turnMessageId ?? prev.activeTurnMessageId
+  const lastUser =
+    (anchorId
+      ? prev.messages.find((message) => message.role === "user" && message.id === anchorId)
+      : undefined) ?? latestUser
+  const previousOutcome = chatTurnOutcomeOf(lastUser?.metadata)
+  const turnCanFail =
+    wasBusy ||
+    previousOutcome?.state === "running" ||
+    previousOutcome?.state === "failed" ||
+    (!previousOutcome && prev.messages.at(-1)?.id === lastUser?.id)
+  const outcome =
+    opts?.turnOutcome ??
+    (next === "streaming" && !wasBusy
+      ? "running"
+      : next === "error" && turnCanFail
+        ? "failed"
+        : next === "idle" && wasBusy
+          ? "completed"
+          : undefined)
+  const user = outcome ? lastUser : undefined
+  if (user && outcome) {
+    patch.activeTurnMessageId = outcome === "running" ? user.id : null
+    const stamp = {
+      state: outcome,
+      revision: (chatTurnOutcomeOf(user.metadata)?.revision ?? 0) + 1,
+      retryable:
+        outcome === "interrupted" ||
+        outcome === "running" ||
+        (opts?.retryable ?? isRecoverableChatFailure(prev.errorDiagnostic, prev.errorMessage)),
+    }
+    patch.messages = prev.messages.map((message) =>
+      message.id === user.id
+        ? {
+            ...message,
+            metadata: { ...(message.metadata as Record<string, unknown>), chatTurnOutcome: stamp },
+          }
+        : message
+    )
+    // Targeted, queued metadata writes survive terminal transcript snapshots
+    // and are published through the existing Host transcript revision stream.
+    void import("@/lib/db/messages")
+      .then(({ updateMessageMetadata }) => {
+        const current = useChatStore
+          .getState()
+          .sessions[id]?.messages.find((message) => message.id === user.id)
+        if (chatTurnOutcomeOf(current?.metadata)?.revision !== stamp.revision) return
+        return updateMessageMetadata(id, user.id, { chatTurnOutcome: stamp })
+      })
+      .catch(() => undefined)
   }
   return patch
 }
@@ -1082,7 +1154,10 @@ export const useChatStore = create<ChatState>((set) => ({
       const openSessionIds = s.openSessionIds.filter((x) => x !== id)
       const sessions = { ...s.sessions }
       const retained = Boolean(s.paneIdsBySession[id]?.length || s.backgroundHolds[id]?.length)
-      if (!retained) delete sessions[id]
+      if (!retained) {
+        delete sessions[id]
+        clearComputerUsePipSession(id, true)
+      }
       const lastSendBySession = { ...s.lastSendBySession }
       if (!retained) delete lastSendBySession[id]
       const splitSessionId = s.splitSessionId === id ? null : s.splitSessionId
@@ -1156,7 +1231,27 @@ export const useChatStore = create<ChatState>((set) => ({
     ),
   appendSessionMessage: (id, msg) =>
     set((s) => patchSliceState(s, id, { messages: [...sliceForId(s, id).messages, msg] })),
-  replaceSessionMessages: (id, msgs) => set((s) => patchSliceState(s, id, { messages: msgs })),
+  replaceSessionMessages: (id, msgs) =>
+    set((s) => {
+      const previous =
+        sliceForId(s, id).messages.find(
+          (message) => message.id === sliceForId(s, id).activeTurnMessageId
+        ) ??
+        lastUserMessage(
+          selectVisibleMessages(sliceForId(s, id).messages, sliceForId(s, id).activeBranchByGroup)
+        )
+      const messages = previous
+        ? msgs.map((message) => {
+            if (message.id !== previous.id) return message
+            const metadata = mergeChatTurnMetadata(
+              message.metadata as Record<string, unknown> | undefined,
+              previous.metadata as Record<string, unknown> | undefined
+            )
+            return metadata === message.metadata ? message : { ...message, metadata }
+          })
+        : msgs
+      return patchSliceState(s, id, { messages })
+    }),
   upsertSessionMessages: (id, msgs) =>
     set((s) => {
       const existing = sliceForId(s, id).messages
@@ -1188,7 +1283,9 @@ export const useChatStore = create<ChatState>((set) => ({
         // Clearing the structured half too: a legacy string write must never
         // leave a stale diagnostic behind describing a different failure.
         errorDiagnostic: null,
-        ...statusPatch(s, id, msg ? "error" : "idle"),
+        ...statusPatch(s, id, msg ? "error" : "idle", {
+          retryable: isRecoverableChatFailure(null, msg),
+        }),
       })
     ),
   setSessionDiagnostic: (id, diagnostic) =>
@@ -1199,7 +1296,9 @@ export const useChatStore = create<ChatState>((set) => ({
         // store state directly — `use-session-notifications`, the desktop
         // workspace toast — keep working untouched during the migration.
         errorMessage: diagnostic?.message ?? null,
-        ...statusPatch(s, id, diagnostic ? "error" : "idle"),
+        ...statusPatch(s, id, diagnostic ? "error" : "idle", {
+          retryable: isRecoverableChatFailure(diagnostic),
+        }),
       })
     ),
   enqueueSteer: (id, entry) =>
@@ -1653,35 +1752,39 @@ export const useChatStore = create<ChatState>((set) => ({
   hydrateActiveBranches: (map) =>
     set((s) => patchActiveState(s, { activeBranchByGroup: { ...map } })),
   clear: () =>
-    set({
-      activeSessionId: null,
-      sessions: {},
-      openSessionIds: [],
-      paneIdsBySession: {},
-      backgroundHolds: {},
-      splitSessionId: null,
-      messages: [],
-      status: "idle",
-      errorMessage: null,
-      errorDiagnostic: null,
-      pendingApprovals: [],
-      permissionMode: null,
-      referencedPaths: [],
-      referencedWorkflowElements: [],
-      citedRefs: [],
-      contextSelections: [],
-      carriedPreambles: [],
-      pendingCommandOverrides: null,
-      bookmarkedIds: [],
-      webSearchOnForNextSend: false,
-      ephemeralSkillIds: [],
-      replyTo: null,
-      lastSendBySession: {},
-      pendingArtifactEditTarget: {},
-      activeBranchByGroup: {},
-      messagesLoading: false,
-      messagesLoadError: null,
-      messagesReloadNonce: 0,
+    set((state) => {
+      for (const sessionId of Object.keys(state.sessions))
+        clearComputerUsePipSession(sessionId, true)
+      return {
+        activeSessionId: null,
+        sessions: {},
+        openSessionIds: [],
+        paneIdsBySession: {},
+        backgroundHolds: {},
+        splitSessionId: null,
+        messages: [],
+        status: "idle",
+        errorMessage: null,
+        errorDiagnostic: null,
+        pendingApprovals: [],
+        permissionMode: null,
+        referencedPaths: [],
+        referencedWorkflowElements: [],
+        citedRefs: [],
+        contextSelections: [],
+        carriedPreambles: [],
+        pendingCommandOverrides: null,
+        bookmarkedIds: [],
+        webSearchOnForNextSend: false,
+        ephemeralSkillIds: [],
+        replyTo: null,
+        lastSendBySession: {},
+        pendingArtifactEditTarget: {},
+        activeBranchByGroup: {},
+        messagesLoading: false,
+        messagesLoadError: null,
+        messagesReloadNonce: 0,
+      }
     }),
 }))
 

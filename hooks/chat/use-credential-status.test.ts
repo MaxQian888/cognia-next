@@ -14,6 +14,7 @@ jest.mock("@/lib/claude/ipc", () => ({
 jest.mock("@/lib/subscription/core/transport", () => ({
   getActiveAccount: jest.fn(async () => ({ activeAccountId: null, env: [] })),
   getAccount: jest.fn(async () => null),
+  getAccountDetail: jest.fn(async () => null),
 }))
 
 jest.mock("@/lib/tauri", () => ({
@@ -39,11 +40,14 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
 jest.mock("@/lib/ai/chat/resolve-standalone-provider", () => ({
   resolveStandaloneProvider: () => mockResolution.value,
 }))
+const mockSettingsState = {
+  settings: { updatedAt: 1 } as import("@cognia/agent-config-types").AppSettings,
+}
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: Object.assign(
     (selector: (s: { settings?: { updatedAt?: number } }) => unknown) =>
-      selector({ settings: { updatedAt: 1 } }),
-    { getState: () => ({ settings: { updatedAt: 1 } }) }
+      selector(mockSettingsState),
+    { getState: () => mockSettingsState }
   ),
 }))
 
@@ -51,7 +55,7 @@ import { renderHook, waitFor, act } from "@testing-library/react"
 
 import { useCredentialStatus } from "./use-credential-status"
 import { hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
-import { getActiveAccount, getAccount } from "@/lib/subscription/core/transport"
+import { getActiveAccount, getAccount, getAccountDetail } from "@/lib/subscription/core/transport"
 import { isTauri } from "@/lib/tauri"
 import {
   notifySubscriptionChanged,
@@ -62,9 +66,11 @@ const mHasApiKey = hasApiKey as jest.Mock
 const mHasOauthBearer = hasOauthBearer as jest.Mock
 const mGetActive = getActiveAccount as jest.Mock
 const mGetAccount = getAccount as jest.Mock
+const mGetDetail = getAccountDetail as jest.Mock
 const mIsTauri = isTauri as jest.Mock
 
 beforeEach(() => {
+  mockSettingsState.settings = { updatedAt: 1 } as import("@cognia/agent-config-types").AppSettings
   unlockedAccountId = "local_acct_a"
   mockStandalone.value = false
   mockResolution.value = { kind: "unresolved" }
@@ -73,6 +79,7 @@ beforeEach(() => {
   mHasOauthBearer.mockResolvedValue(false)
   mGetActive.mockResolvedValue({ activeAccountId: null, env: [] })
   mGetAccount.mockResolvedValue(null)
+  mGetDetail.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -138,19 +145,27 @@ describe("useCredentialStatus", () => {
     expect(result.current.plan).toBeNull()
   })
 
-  it("treats probe failures (Error and non-Error) as not configured", async () => {
+  it("treats probe failures (Error and non-Error) as unknown", async () => {
     mHasApiKey.mockRejectedValue(new Error("ipc down"))
     mHasOauthBearer.mockRejectedValue("string failure")
     const { result } = renderHook(() => useCredentialStatus())
-    await waitFor(() => expect(result.current.keyOk).toBe(false))
+    await waitFor(() => expect(mHasApiKey).toHaveBeenCalled())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.keyOk).toBeNull()
     expect(result.current.plan).toBeNull()
   })
 
-  it("treats probe failures with swapped error types as not configured", async () => {
+  it("treats probe failures with swapped error types as unknown", async () => {
     mHasApiKey.mockRejectedValue("string failure")
     mHasOauthBearer.mockRejectedValue(new Error("ipc down"))
     const { result } = renderHook(() => useCredentialStatus())
-    await waitFor(() => expect(result.current.keyOk).toBe(false))
+    await waitFor(() => expect(mHasApiKey).toHaveBeenCalled())
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.keyOk).toBeNull()
     expect(result.current.plan).toBeNull()
   })
 
@@ -225,5 +240,127 @@ describe("useCredentialStatus", () => {
 
     await waitFor(() => expect(result.current.keyOk).toBe(true))
     await waitFor(() => expect(result.current.plan).toBe("pro"))
+  })
+})
+
+describe("selected-route credentials", () => {
+  it("uses secret-free detail to check a selected account", async () => {
+    mGetDetail.mockResolvedValue({ id: "selected-account", provider: "anthropic" })
+    const { result } = renderHook(() =>
+      useCredentialStatus({ providerId: "anthropic", accountId: "selected-account" })
+    )
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    expect(mGetDetail).toHaveBeenCalledWith("anthropic", "selected-account")
+    expect(mGetAccount).not.toHaveBeenCalled()
+  })
+  it("uses a CCSwitch relay before a default Anthropic account", async () => {
+    Object.assign(mockSettingsState.settings, {
+      activeProviderId: "ccswitch:claude:relay",
+      apiKey: "relay-key",
+      defaultAccountIds: { anthropic: "old-account" },
+    })
+    const { result } = renderHook(() => useCredentialStatus({ providerId: "anthropic" }))
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    expect(mGetDetail).not.toHaveBeenCalled()
+    expect(mGetAccount).not.toHaveBeenCalled()
+  })
+
+  it("prefers a gateway manual key over an unpinned default OAuth account", async () => {
+    mockSettingsState.settings.defaultAccountIds = { anthropic: "oauth-account" }
+    mockSettingsState.settings.providerSettings = {
+      anthropic: { apiKey: "manual-key", enabled: true },
+    } as never
+    const { result } = renderHook(() =>
+      useCredentialStatus({ providerId: "anthropic", gateway: true })
+    )
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    expect(mGetAccount).not.toHaveBeenCalled()
+  })
+
+  it("ignores a stale account pin when the selected provider has no subscription accounts", async () => {
+    mockSettingsState.settings.providerSettings = {
+      deepseek: { apiKey: "manual-key", enabled: true },
+    } as never
+    const { result } = renderHook(() =>
+      useCredentialStatus({ providerId: "deepseek", accountId: "old-anthropic-account" })
+    )
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    expect(mGetAccount).not.toHaveBeenCalled()
+  })
+
+  it("invalidates a desktop result immediately when credentials become Agent-owned", async () => {
+    mHasApiKey.mockResolvedValue(true)
+    const { result, rerender } = renderHook(
+      ({ providerId }: { providerId?: string | null }) => useCredentialStatus({ providerId }),
+      { initialProps: {} as { providerId?: string | null } }
+    )
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    rerender({ providerId: null })
+    expect(result.current.keyOk).toBeNull()
+  })
+
+  it("uses the selected provider's key instead of Anthropic state", async () => {
+    mockSettingsState.settings.providerSettings = {
+      deepseek: { apiKey: "test-key", enabled: true },
+    } as never
+    const { result, rerender } = renderHook(
+      ({ providerId }) => useCredentialStatus({ providerId }),
+      { initialProps: { providerId: "deepseek" } }
+    )
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    expect(mHasApiKey).not.toHaveBeenCalled()
+    rerender({ providerId: "openai" })
+    await waitFor(() => expect(result.current.keyOk).toBe(false))
+    expect(mHasApiKey).not.toHaveBeenCalled()
+  })
+
+  it("does not use a provider key in place of a missing pinned account", async () => {
+    mockSettingsState.settings.providerSettings = {
+      anthropic: { apiKey: "other-account-key", enabled: true },
+    } as never
+    const { result } = renderHook(() =>
+      useCredentialStatus({ providerId: "anthropic", accountId: "missing-account" })
+    )
+    await waitFor(() => expect(result.current.keyOk).toBe(false))
+    expect(mGetDetail).toHaveBeenCalledWith("anthropic", "missing-account")
+    expect(mGetAccount).not.toHaveBeenCalled()
+    expect(mHasApiKey).not.toHaveBeenCalled()
+  })
+
+  it("does not mistake the desktop Anthropic bearer for a gateway credential", async () => {
+    mHasOauthBearer.mockResolvedValue(true)
+    const { result } = renderHook(() =>
+      useCredentialStatus({ providerId: "anthropic", gateway: true })
+    )
+    await waitFor(() => expect(result.current.keyOk).toBe(false))
+    expect(mHasOauthBearer).not.toHaveBeenCalled()
+  })
+
+  it("leaves Agent-owned credentials unknown without probing Anthropic", async () => {
+    const { result } = renderHook(() => useCredentialStatus({ providerId: null }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.keyOk).toBeNull()
+    expect(mHasApiKey).not.toHaveBeenCalled()
+  })
+
+  it("ignores an older probe completing after a newer subscription event", async () => {
+    let finishOld!: (value: boolean) => void
+    mHasApiKey.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishOld = resolve
+        })
+    )
+    const { result } = renderHook(() => useCredentialStatus())
+    await waitFor(() => expect(mHasApiKey).toHaveBeenCalledTimes(1))
+    mHasApiKey.mockResolvedValue(true)
+    act(() => notifySubscriptionChanged())
+    await waitFor(() => expect(result.current.keyOk).toBe(true))
+    await act(async () => {
+      finishOld(false)
+    })
+    expect(result.current.keyOk).toBe(true)
   })
 })
