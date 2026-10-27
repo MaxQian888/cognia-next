@@ -8,7 +8,7 @@ import { z } from "zod"
  * together with Cognia's certified host composition and launcher. The package
  * lock and composition digests identify the exact runtime we can execute.
  *
- * @see runtime/deepseek-harness/README.md for why Cognia owns the host plane.
+ * @see packages/agent-dsh/runtime/README.md for why Cognia owns the host plane.
  */
 
 /**

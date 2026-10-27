@@ -6,10 +6,19 @@ const resolve = (config: Parameters<typeof resolveAcpVendorProfile>[0]) =>
   resolveAcpVendorProfile(config, ACP_VENDOR_PROFILES)?.id
 
 describe("resolveAcpVendorProfile", () => {
+  it("selects the separate official Antigravity server on Unix and Windows", () => {
+    expect(resolve({ metadata: { preset: "antigravity-acp" } })).toBe("antigravity-acp")
+    expect(resolve({ process: { command: "/opt/agy/agy_acp_server.par" } })).toBe("antigravity-acp")
+    expect(resolve({ process: { command: "C:\\Tools\\agy_acp_server.exe" } })).toBe(
+      "antigravity-acp"
+    )
+    expect(resolve({ process: { command: "agy" } })).toBeUndefined()
+  })
   it("selects a profile by preset id", () => {
     expect(resolve({ metadata: { preset: "kimi" } })).toBe("kimi")
     expect(resolve({ metadata: { preset: "grok" } })).toBe("grok")
     expect(resolve({ metadata: { preset: "opencode-acp" } })).toBe("opencode-acp")
+    expect(resolve({ metadata: { preset: "copilot-cli" } })).toBe("copilot-cli")
   })
 
   it("selects a profile by executable basename, with or without .exe, on either separator", () => {
@@ -19,6 +28,7 @@ describe("resolveAcpVendorProfile", () => {
     expect(resolve({ process: { command: "/opt/bin/grok" } })).toBe("grok")
     expect(resolve({ process: { command: "C:\\Tools\\Grok.EXE" } })).toBe("grok")
     expect(resolve({ process: { command: "/opt/opencode" } })).toBe("opencode-acp")
+    expect(resolve({ process: { command: "C:\\Tools\\copilot.exe" } })).toBe("copilot-cli")
   })
 
   it("prefers the preset over the executable", () => {

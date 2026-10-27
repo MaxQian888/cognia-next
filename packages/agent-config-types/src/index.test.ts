@@ -43,6 +43,13 @@ describe("PluginToolExecEvent", () => {
 })
 
 describe("SendOptions", () => {
+  it("carries only a host deadline and bounded verification policy, without a permission grant", () => {
+    const options: SendOptions = {
+      verificationBudget: { startedAtEpochMs: 1000, deadlineEpochMs: 361_000, maxBatchMs: 15_000 },
+    }
+    expect(JSON.parse(JSON.stringify(options))).toEqual(options)
+    expect(options.verificationBudget?.deadlineEpochMs).toBe(361_000)
+  })
   it("carries the immutable sandbox runtime reference on the host envelope", () => {
     const options: SendOptions = { sandboxRuntimeRef: "sandbox-runtime:send" }
     expect(options.sandboxRuntimeRef).toBe("sandbox-runtime:send")

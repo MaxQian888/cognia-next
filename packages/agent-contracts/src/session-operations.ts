@@ -45,6 +45,9 @@ export interface AgentExtensionReloadResult {
 }
 
 export interface AgentRuntimeFeatureRequest {
+  toolSearchEnabled?: boolean
+  alwaysLoadServers?: readonly string[]
+  alwaysLoadTools?: readonly string[]
   subagentRuntime?: AgentSubagentRuntimeOptions
   runtimeExtensions?: AgentLocalExtensionRef[]
   agents?: Record<string, { contextPolicy?: AgentSubagentContextPolicy }>
@@ -86,7 +89,8 @@ export function runtimeFeaturePolicyKey(request: AgentRuntimeFeatureRequest): st
     request.subagentRuntime?.contextMode !== "fork" &&
     !agents.length &&
     !rules.length &&
-    !request.runtimeExtensions?.length
+    !request.runtimeExtensions?.length &&
+    request.toolSearchEnabled !== true
   )
     return undefined
   return JSON.stringify({
@@ -94,10 +98,27 @@ export function runtimeFeaturePolicyKey(request: AgentRuntimeFeatureRequest): st
     agents,
     rules,
     extensions: request.runtimeExtensions ?? [],
+    ...(request.toolSearchEnabled === true
+      ? {
+          toolSearch: {
+            alwaysLoadServers: [...new Set(request.alwaysLoadServers ?? [])].sort(),
+            alwaysLoadTools: [...new Set(request.alwaysLoadTools ?? [])].sort(),
+          },
+        }
+      : {}),
   })
 }
 
 export function runtimeFeatureValidationError(request: AgentRuntimeFeatureRequest): string | null {
+  if (request.toolSearchEnabled !== undefined && typeof request.toolSearchEnabled !== "boolean")
+    return "invalid_tool_search_policy"
+  for (const names of [request.alwaysLoadServers, request.alwaysLoadTools]) {
+    if (
+      names !== undefined &&
+      (!Array.isArray(names) || names.some((name) => typeof name !== "string" || !name.trim()))
+    )
+      return "invalid_tool_search_policy"
+  }
   if (
     request.subagentRuntime !== undefined &&
     (!request.subagentRuntime ||

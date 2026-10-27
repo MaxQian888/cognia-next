@@ -10,6 +10,34 @@ import {
 } from "./session-operations"
 
 describe("portable runtime feature intent", () => {
+  it.each([
+    { toolSearchEnabled: "yes" },
+    { toolSearchEnabled: true, alwaysLoadTools: 7 },
+    { alwaysLoadServers: [null] },
+    { alwaysLoadTools: [" "] },
+  ])("rejects invalid discovery wire input before retention hashing", (invalid) => {
+    expect(runtimeFeatureValidationError(invalid as never)).toBe("invalid_tool_search_policy")
+  })
+  it("invalidates discovery changes but ignores ordering,duplicates and disabled residency", () => {
+    const base = {
+      toolSearchEnabled: true,
+      alwaysLoadTools: ["write", "read"],
+      alwaysLoadServers: ["local"],
+    }
+    expect(runtimeFeaturePolicyKey(base)).not.toBe(runtimeFeaturePolicyKey({}))
+    expect(runtimeFeaturePolicyKey(base)).toBe(
+      runtimeFeaturePolicyKey({ ...base, alwaysLoadTools: ["read", "write", "read"] })
+    )
+    expect(runtimeFeaturePolicyKey(base)).not.toBe(
+      runtimeFeaturePolicyKey({ ...base, alwaysLoadTools: ["write"] })
+    )
+    expect(runtimeFeaturePolicyKey(base)).not.toBe(
+      runtimeFeaturePolicyKey({ ...base, alwaysLoadServers: [] })
+    )
+    expect(
+      runtimeFeaturePolicyKey({ toolSearchEnabled: false, alwaysLoadTools: ["write"] })
+    ).toBeUndefined()
+  })
   it("uses a stable retention key for policy semantics and preserves default compatibility", () => {
     expect(runtimeFeaturePolicyKey({})).toBeUndefined()
     expect(

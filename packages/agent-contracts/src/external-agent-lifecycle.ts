@@ -277,6 +277,7 @@ export const EXTERNAL_AGENT_VERSION_PARSERS = [
   "semver-first-line",
   "semver-prefixed-v",
   "json-version-field",
+  "antigravity-build-label",
 ] as const
 
 export type ExternalAgentVersionParserId = (typeof EXTERNAL_AGENT_VERSION_PARSERS)[number]
@@ -335,6 +336,8 @@ export interface ExternalAgentRuntimeCatalogEntry {
    * remote runtimes launch nothing.
    */
   systemCommand?: string
+  /** Verified host bundle; never authorizes arbitrary Node scripts. */
+  bundledBridgeId?: "codebuff"
   /** Arguments the launch always carries. */
   launchArgs?: string[]
   /** Exact former default launches retained for attribution only, never command rewriting. */

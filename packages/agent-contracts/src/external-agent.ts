@@ -72,6 +72,11 @@ export type ExternalAgentProtocol =
   | "dsh-sdk" // DeepSeek Harness stdio JSON-RPC SDK runtime (observation-rich, no mid-turn approval)
   | "pi-rpc" // Pi native `pi --mode rpc` JSONL command/event protocol (NOT JSON-RPC, NOT ACP)
   | "aider-cli" // Official one-shot CLI; Cognia-owned history, no per-tool approval wire
+  | "openclaude-cli" // OpenClaude bidirectional JSONL control and prompt protocol
+  | "crush-http" // Crush native workspace HTTP/SSE service
+  | "continue-cli" // Continue headless JSON with host-owned history
+  | "rovo-http" // Rovo Dev native session HTTP/SSE service
+  | "codebuff-sdk" // Guarded Node SDK bridge over bounded JSONL
   | "opencode" // Explicit OpenCode V1 server API; independent of V2
   | "opencode-v2" // Current OpenCode V2 native API
   | "a2a" // Agent-to-Agent Protocol (Google)
@@ -2421,6 +2426,13 @@ export interface ExternalAgentToolUseStartEvent extends ExternalAgentEventBase {
 
 /** Presentation and safety metadata shared by external-agent tool adapters. */
 export interface ExternalAgentToolMetadata {
+  /** Native child navigation is read-only; execution remains owned by the parent. */
+  nativeSubagent?: {
+    runtime: "goose"
+    parentSessionId: string
+    sessionId: string
+    readOnly: true
+  }
   kind?: AcpToolCallKind
   readOnlyHint?: boolean | null
   locations?: AcpToolCallLocation[]
@@ -2685,6 +2697,7 @@ export interface ExternalAgentNesClosedEvent extends ExternalAgentEventBase {
  * @see https://agentclientprotocol.com/protocol/tool-calls
  */
 export interface ExternalAgentToolCallUpdateEvent extends ExternalAgentEventBase {
+  toolMetadata?: ExternalAgentToolMetadata
   type: "tool_call_update"
   toolCallId: string
   status?: AcpToolCallStatus

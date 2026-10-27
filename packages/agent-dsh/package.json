@@ -11,6 +11,10 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "runtime/launcher.mjs",
+    "runtime/host.*.yml",
+    "runtime/package.json",
+    "runtime/README.md",
     "LICENSE",
     "README.md"
   ],

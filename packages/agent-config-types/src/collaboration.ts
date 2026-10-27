@@ -40,6 +40,14 @@ export interface AuthorRef {
   source?: string
 }
 
+/**
+ * How much of a tool call a shared run shows its members (ADR-0241 D18).
+ * `summary` (the default): the tool, the workspace paths it touched and diff
+ * stats. `full`: also the commands, edits, patterns, queries and todos each
+ * card reads, redacted. Only a session owner or maintainer changes it.
+ */
+export type SharedToolDetail = "summary" | "full"
+
 export interface SharedSession {
   id: string
   orgId: string
@@ -51,6 +59,15 @@ export interface SharedSession {
   updatedAt: number
   revision: number
   policyRevision: number
+  /** Absent from a server older than ADR-0241: read as `summary`. */
+  toolDetail?: SharedToolDetail
+  /**
+   * Bumped by every tool-detail change. A publication carries the revision it
+   * was projected under, and the server refuses an older one
+   * (`409 tool_detail_stale`), so a downgrade binds an executor that missed
+   * the `member.updated` frame.
+   */
+  toolDetailRevision?: number
 }
 
 export interface SessionMembership {

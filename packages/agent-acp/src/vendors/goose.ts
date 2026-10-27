@@ -1,6 +1,14 @@
 import type { AcpPermissionMode } from "@cognia/agent-contracts/external-agent"
 import type { AcpVendorProfile } from "../vendor-profile"
 
+let noticeSequence = 0
+
+function object(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
 // Keep edit-only and deny-unapproved policies in Cognia's permission broker.
 // Goose's smart_approve would make its own approval decisions before the client.
 const GOOSE_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
@@ -21,7 +29,73 @@ export const gooseAcpProfile: AcpVendorProfile = Object.freeze<AcpVendorProfile>
   id: "goose",
   label: "Goose",
   commandNames: ["goose"],
+  // Saved sessions retain their native mode; launch env alone cannot restore approvals.
+  reapplySessionMode: true,
+  clientCapabilitiesMeta: { goose: { customNotifications: true } },
+  toolMetadata: (meta, parentSessionId) => {
+    const id = object(meta?.goose)?.subagentSessionId
+    if (
+      typeof id !== "string" ||
+      !id.trim() ||
+      id.length > 256 ||
+      Array.from(id).some((char) => char.charCodeAt(0) < 32)
+    )
+      return undefined
+    return { nativeSubagent: { runtime: "goose", parentSessionId, sessionId: id, readOnly: true } }
+  },
+  notification: (method, params, timestamp) => {
+    if (method !== "_goose/unstable/session/update" || typeof params.sessionId !== "string")
+      return null
+    const update = object(params.update)
+    const status = object(update?.status)
+    if (
+      update?.sessionUpdate === "status_message" &&
+      (status?.type === "notice" || status?.type === "progress") &&
+      typeof status.message === "string" &&
+      status.message.length <= 65536
+    ) {
+      return status.type === "progress"
+        ? { type: "commentary_delta", sessionId: params.sessionId, timestamp, text: status.message }
+        : {
+            type: "extension_ui_update",
+            sessionId: params.sessionId,
+            timestamp,
+            id: `goose-notice-${++noticeSequence}`,
+            update: {
+              kind: "notification",
+              level: "info",
+              message: status.message,
+            },
+          }
+    }
+    if (
+      update?.sessionUpdate === "usage_update" &&
+      typeof update.used === "number" &&
+      Number.isFinite(update.used) &&
+      update.used >= 0 &&
+      typeof update.contextLimit === "number" &&
+      Number.isFinite(update.contextLimit) &&
+      update.contextLimit > 0
+    ) {
+      const cost =
+        typeof update.accumulatedCost === "number" &&
+        Number.isFinite(update.accumulatedCost) &&
+        update.accumulatedCost >= 0
+          ? { amount: update.accumulatedCost, currency: "USD" }
+          : undefined
+      return {
+        type: "usage_update",
+        sessionId: params.sessionId,
+        timestamp,
+        used: update.used,
+        size: update.contextLimit,
+        ...(cost ? { cost } : {}),
+      }
+    }
+    return null
+  },
   permissionModes: {
+    mandatoryApprovalMode: "approve",
     toNative: (mode) => GOOSE_PERMISSION_MODES[mode] ?? mode,
     toCanonical: (nativeMode, current) => {
       if (nativeMode === "chat") return "plan"

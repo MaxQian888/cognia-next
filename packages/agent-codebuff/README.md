@@ -1,0 +1,11 @@
+# @cognia/agent-codebuff
+
+Official `@codebuff/sdk` **0.10.7** integration behind Cognia's ADR-0217 host ports. The SDK runs only in the executable `node-bridge` subpath, started with `--cognia-codebuff-bridge`; the package index, client and pure manifest have no Node or SDK import.
+
+`CodebuffAdapter` takes process/file/fetch ports, the outbound gate, diagnostic redactor, approval policy and `resolveBridgeLaunch(config)`. The resolver must return a verified bridge with `networkIsolated:true` backed by actual host enforcement. The app accepts only its registered local POSIX bridge launch; the host requires OS sandbox `network:off` and refuses Windows/unsandboxed fallback. The packaged Node bridge needs the pinned SDK's complete dependency and WASM/ripgrep asset closure, outside the static app graph.
+
+The bounded JSONL protocol forwards published SDK callbacks, operation approvals and backpressured fetch bodies to the host. All network uses host fetch/proxy/privacy policy and verified first-party Codebuff API paths; custom provider OAuth/native MCP are unsupported. SDK fsSource confines file operations, brokers reads/writes/deletes and rechecks symlinks after approvals. Audited read-helper subprocesses and approved bounded shell/search overrides are the only subprocess paths; SDK/MCP child_process entry points are denied before SDK import. Search flags that execute external programs are rejected.
+
+The official agent is pinned as `codebuff/base@0.0.16`. Completed SDK RunState is stored in `.cognia/agent-sessions/codebuff-UUID.json`, bound to its configuration/workspace. Resume passes that state back as `previousRun`; there is no crash checkpoint or in-flight resume claim. Cancellation propagates the SDK signal and retires the session process; reopen is required. Host MCP, arbitrary tool matching/allowlists, extra roots, unsupported permission modes and unimplemented model controls fail explicitly.
+
+Contract sources: [published SDK](https://registry.npmjs.org/@codebuff/sdk/0.10.7), [pinned run implementation](https://github.com/CodebuffAI/freebuff/blob/e6cff2289b20faf07972c293adfb661b2dc1ab73/sdk/src/run.ts), [published callbacks](https://github.com/CodebuffAI/freebuff/blob/e6cff2289b20faf07972c293adfb661b2dc1ab73/common/src/types/print-mode.ts).

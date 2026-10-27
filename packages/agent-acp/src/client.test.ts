@@ -1760,27 +1760,100 @@ describe("AcpClientAdapter — Goose permission modes", () => {
       })),
     },
   ]
-  function gooseAdapter() {
+  function gooseAdapter(overrides: Partial<ExternalAgentConfig> = {}) {
     const adapter = new AcpClientAdapter(acpDeps())
     ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
       ...stdioConfig(),
       metadata: { preset: "goose" },
       process: { command: "goose", args: ["acp"], cwd: "/work" },
+      ...overrides,
     }
     setStatus(adapter, "connected")
     return adapter
   }
-  it.each([
-    ["approve", "default"],
-    ["chat", "plan"],
-    ["auto", "bypassPermissions"],
-    ["smart_approve", "default"],
-  ])("canonicalizes %s as %s", async (native, canonical) => {
-    const adapter = gooseAdapter()
-    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest
-      .fn()
-      .mockResolvedValue({ sessionId: "s", configOptions: modeOptions(native) })
-    expect((await adapter.createSession({ cwd: "/work" })).permissionMode).toBe(canonical)
+  it.each(["approve", "chat", "auto", "smart_approve"])(
+    "restores the host default instead of retaining saved native %s mode",
+    async (native) => {
+      const adapter = gooseAdapter()
+      const sendRequest = jest.fn(async (method: string, params: Record<string, unknown>) =>
+        method === "session/set_config_option"
+          ? { configOptions: modeOptions(String(params.value)) }
+          : { sessionId: "s", configOptions: modeOptions(native) }
+      )
+      ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+      expect((await adapter.createSession({ cwd: "/work" })).permissionMode).toBe("default")
+      expect(sendRequest).toHaveBeenCalledWith("session/set_config_option", {
+        sessionId: "s",
+        configId: "mode",
+        value: "approve",
+      })
+    }
+  )
+
+  describe.each(["new", "load", "resume"] as const)("session/%s mode restoration", (operation) => {
+    async function setup(adapter: AcpClientAdapter, permissionMode: AcpPermissionMode) {
+      const options = { cwd: "/work", permissionMode }
+      return operation === "new"
+        ? adapter.createSession(options)
+        : operation === "load"
+          ? adapter.loadSession("s", options)
+          : adapter.resumeSession("s", options)
+    }
+
+    function respondingAdapter(requireApprovalFor?: string[]) {
+      const adapter = gooseAdapter({ requireApprovalFor })
+      setAgentCaps(adapter, { loadSession: true, sessionCapabilities: { resume: true } })
+      const sendRequest = jest.fn(async (method: string, params: Record<string, unknown>) =>
+        method === "session/set_config_option"
+          ? { configOptions: modeOptions(String(params.value)) }
+          : { sessionId: "s", configOptions: modeOptions("auto") }
+      )
+      ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+      return { adapter, sendRequest }
+    }
+
+    it.each<AcpPermissionMode>(["default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"])(
+      "forces mandatory native approval for a legacy auto response while retaining host %s",
+      async (mode) => {
+        const { adapter, sendRequest } = respondingAdapter(["write"])
+        const session = await setup(adapter, mode)
+        expect(session.permissionMode).toBe(mode)
+        expect(adapter.getSession("s")?.permissionMode).toBe(mode)
+        expect(sendRequest.mock.calls.map(([method]) => method)).toEqual([
+          `session/${operation}`,
+          "session/set_config_option",
+        ])
+        expect(sendRequest).toHaveBeenLastCalledWith("session/set_config_option", {
+          sessionId: "s",
+          configId: "mode",
+          value: "approve",
+        })
+      }
+    )
+
+    it.each<[AcpPermissionMode, string]>([
+      ["default", "approve"],
+      ["plan", "chat"],
+      ["bypassPermissions", "auto"],
+    ])("restores ordinary host %s to native %s without mandatory rules", async (mode, native) => {
+      const { adapter, sendRequest } = respondingAdapter()
+      expect((await setup(adapter, mode)).permissionMode).toBe(mode)
+      expect(sendRequest).toHaveBeenLastCalledWith("session/set_config_option", {
+        sessionId: "s",
+        configId: "mode",
+        value: native,
+      })
+    })
+
+    it("does not expose the session when mandatory approval restoration is rejected", async () => {
+      const { adapter, sendRequest } = respondingAdapter(["write"])
+      sendRequest.mockImplementation(async () => ({
+        sessionId: "s",
+        configOptions: modeOptions("auto"),
+      }))
+      await expect(setup(adapter, "bypassPermissions")).rejects.toThrow(/mandatory approval/i)
+      expect(adapter.getSession("s")).toBeUndefined()
+    })
   })
   it.each<[AcpPermissionMode, string]>([
     ["default", "approve"],
@@ -4074,6 +4147,80 @@ describe("AcpClientAdapter — rapid-crash circuit breaker", () => {
 // ── ACP v1 session-update coverage ──────────────────────────────────────────
 
 type AnyUpdate = { sessionUpdate: string; [k: string]: unknown }
+
+describe("Goose v1.56 event contracts", () => {
+  function goose() {
+    const adapter = new AcpClientAdapter(acpDeps())
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset: "goose" },
+    }
+    seedSession(adapter, "parent", "default")
+    return adapter
+  }
+
+  it.each([
+    ["1.52.0", false],
+    ["1.55.9", false],
+    ["1.56.0", true],
+    ["1.57.0", true],
+    [undefined, false],
+    ["2.0.0", false],
+  ] as const)(
+    "offers versioned child controls only for the supported Goose v1 contract (%s)",
+    (version, available) => {
+      const adapter = goose()
+      ;(adapter as unknown as { _agentInfo?: { name: string; version: string } })._agentInfo =
+        version ? { name: "Goose", version } : undefined
+      expect(adapter.gooseSessionControls !== undefined).toBe(available)
+    }
+  )
+
+  it("preserves child identity through completed tool events", () => {
+    expect(
+      handleUpdate(goose(), "parent", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "delegate",
+        status: "completed",
+        _meta: { goose: { subagentSessionId: "child" } },
+      })
+    ).toMatchObject({
+      toolMetadata: {
+        nativeSubagent: {
+          runtime: "goose",
+          parentSessionId: "parent",
+          sessionId: "child",
+          readOnly: true,
+        },
+      },
+    })
+  })
+
+  it("surfaces the Goose compaction notice without enabling other vendors", () => {
+    const message = {
+      method: "_goose/unstable/session/update",
+      params: {
+        sessionId: "parent",
+        update: {
+          sessionUpdate: "status_message",
+          status: { type: "notice", message: "Context compacted" },
+        },
+      },
+    }
+    const notify = (adapter: AcpClientAdapter) =>
+      (
+        adapter as unknown as {
+          notificationToEvent(n: unknown): unknown
+        }
+      ).notificationToEvent(message)
+    expect(notify(goose())).toMatchObject({
+      type: "extension_ui_update",
+      update: { kind: "notification", message: "Context compacted" },
+    })
+    expect(notify(new AcpClientAdapter(acpDeps()))).toBeNull()
+  })
+})
+
 function handleUpdate(a: AcpClientAdapter, sessionId: string, update: AnyUpdate) {
   return (
     a as unknown as {
@@ -5963,5 +6110,811 @@ describe("AcpClientAdapter — vendor profiles from the host", () => {
     } finally {
       await adapter.disconnect()
     }
+  })
+})
+
+describe("AcpClientAdapter — official Antigravity session contract", () => {
+  function antigravity(requireApprovalFor?: string[], withConfigOptions = false) {
+    const adapter = new AcpClientAdapter({
+      ...acpDeps(),
+      approvalPolicy: (config) => (config?.requireApprovalFor?.length ? "ask" : null),
+    })
+    const internal = adapter as unknown as {
+      _config: ExternalAgentConfig
+      _agentCapabilities: Record<string, unknown>
+      sendRequest: jest.Mock
+    }
+    internal._config = {
+      ...stdioConfig(),
+      metadata: { preset: "antigravity-acp" },
+      process: { command: "agy_acp_server.par", args: [], cwd: "/work" },
+      requireApprovalFor,
+    }
+    internal._agentCapabilities = {
+      loadSession: true,
+      sessionCapabilities: { resume: {}, fork: {} },
+    }
+    setStatus(adapter, "connected")
+    let nativeMode = "yolo"
+    const configOptions = (): AcpConfigOption[] => [
+      {
+        id: "mode",
+        name: "Mode",
+        type: "select",
+        category: "mode",
+        currentValue: nativeMode,
+        options: ["default", "auto_edit", "yolo"].map((value) => ({ value, name: value })),
+      },
+    ]
+    internal.sendRequest = jest.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === "session/set_mode") return {}
+      if (method === "session/set_config_option") nativeMode = params.value as string
+      return {
+        sessionId: method === "session/fork" ? "fork" : (params.sessionId ?? "antigravity"),
+        modes: {
+          currentModeId: "yolo",
+          availableModes: ["default", "auto_edit", "yolo"].map((id) => ({ id, name: id })),
+        },
+        ...(withConfigOptions ? { configOptions: configOptions() } : {}),
+      }
+    })
+    return { adapter, sendRequest: internal.sendRequest }
+  }
+
+  it.each(["new", "load", "resume", "fork"] as const)(
+    "carries instructions in Antigravity's namespace on session/%s and restores default approval",
+    async (operation) => {
+      const { adapter, sendRequest } = antigravity()
+      const options = { cwd: "/work", systemPrompt: "Keep the selected workspace unchanged" }
+      const session =
+        operation === "new"
+          ? await adapter.createSession(options)
+          : operation === "load"
+            ? await adapter.loadSession("saved", options)
+            : operation === "resume"
+              ? await adapter.resumeSession("saved", options)
+              : await adapter.forkSession("saved", options)
+      expect(sendRequest).toHaveBeenCalledWith(
+        `session/${operation}`,
+        expect.objectContaining({
+          _meta: expect.objectContaining({
+            systemPrompt: { append: options.systemPrompt },
+            antigravity: { systemPrompt: { append: options.systemPrompt } },
+          }),
+        })
+      )
+      expect(sendRequest).toHaveBeenLastCalledWith("session/set_mode", {
+        sessionId: session.id,
+        modeId: "default",
+      })
+      expect(session.permissionMode).toBe("default")
+    }
+  )
+
+  it("refuses Plan before creating a native session", async () => {
+    const { adapter, sendRequest } = antigravity()
+    await expect(adapter.createSession({ cwd: "/work", permissionMode: "plan" })).rejects.toThrow(
+      /Antigravity.*Plan/
+    )
+    expect(sendRequest).not.toHaveBeenCalled()
+  })
+
+  it("keeps don't-ask as host policy while restoring native default approvals", async () => {
+    const { adapter, sendRequest } = antigravity()
+    const session = await adapter.createSession({ cwd: "/work", permissionMode: "dontAsk" })
+    expect(sendRequest).toHaveBeenLastCalledWith("session/set_mode", {
+      sessionId: session.id,
+      modeId: "default",
+    })
+    expect(session.permissionMode).toBe("dontAsk")
+  })
+
+  it("does not expose a restored session when resetting native permissions fails", async () => {
+    const { adapter, sendRequest } = antigravity()
+    const ordinary = sendRequest.getMockImplementation()!
+    sendRequest.mockImplementation(async (...args: unknown[]) => {
+      if (args[0] === "session/set_mode") throw new Error("permission reset refused")
+      return ordinary(...args)
+    })
+    await expect(adapter.resumeSession("saved", { cwd: "/work" })).rejects.toThrow(
+      "permission reset refused"
+    )
+    expect(adapter.getSession("saved")).toBeUndefined()
+  })
+
+  for (const mode of ["acceptEdits", "bypassPermissions"] as const) {
+    it.each(["new", "load", "resume", "fork"] as const)(
+      `keeps mandatory approvals native-default and host-${mode} on session/%s`,
+      async (operation) => {
+        const { adapter, sendRequest } = antigravity(["*"])
+        const options = { cwd: "/work", permissionMode: mode }
+        const session =
+          operation === "new"
+            ? await adapter.createSession(options)
+            : operation === "load"
+              ? await adapter.loadSession("saved", options)
+              : operation === "resume"
+                ? await adapter.resumeSession("saved", options)
+                : await adapter.forkSession("saved", options)
+        expect(sendRequest).toHaveBeenLastCalledWith("session/set_mode", {
+          sessionId: session.id,
+          modeId: "default",
+        })
+        expect(session.permissionMode).toBe(mode)
+        await adapter.setSessionMode(session.id, mode)
+        expect(sendRequest).toHaveBeenLastCalledWith("session/set_mode", {
+          sessionId: session.id,
+          modeId: "default",
+        })
+        const events: ExternalAgentEvent[] = []
+        ;(adapter as unknown as { emitEvent(event: ExternalAgentEvent): void }).emitEvent = (
+          event
+        ) => {
+          events.push(event)
+        }
+        const pending = callPermission(
+          adapter,
+          {
+            sessionId: session.id,
+            kind: "edit",
+            options: [ALLOW, REJECT],
+          },
+          undefined,
+          "mandatory"
+        )
+        await adapter.respondToPermission(session.id, {
+          requestId: "mandatory",
+          granted: false,
+          optionId: "reject",
+        })
+        expect(events).toContainEqual(expect.objectContaining({ type: "permission_request" }))
+        await expect(pending).resolves.toEqual({
+          outcome: { outcome: "selected", optionId: "reject" },
+        })
+      }
+    )
+  }
+
+  it.each(["auto_edit", "yolo"])(
+    "rejects raw mode %s with mandatory approvals before sending it",
+    async (value) => {
+      const { adapter, sendRequest } = antigravity(["*"], true)
+      const session = await adapter.createSession({ cwd: "/work" })
+      sendRequest.mockClear()
+      await expect(adapter.setConfigOption(session.id, "mode", value)).rejects.toThrow(
+        /mandatory approval/i
+      )
+      expect(sendRequest).not.toHaveBeenCalled()
+      expect(session.permissionMode).toBe("default")
+    }
+  )
+
+  it("preserves the canonical host mode through guarded config-option mode changes", async () => {
+    const { adapter, sendRequest } = antigravity(["*"], true)
+    const session = await adapter.createSession({
+      cwd: "/work",
+      permissionMode: "bypassPermissions",
+    })
+    expect(sendRequest).toHaveBeenLastCalledWith("session/set_config_option", {
+      sessionId: session.id,
+      configId: "mode",
+      value: "default",
+    })
+    expect(adapter.getSession(session.id)?.permissionMode).toBe("bypassPermissions")
+    await adapter.setConfigOption(session.id, "mode", "default")
+    expect(adapter.getSession(session.id)?.permissionMode).toBe("bypassPermissions")
+  })
+
+  it("retains native auto-edit and yolo mappings without mandatory rules", async () => {
+    const { adapter, sendRequest } = antigravity()
+    const session = await adapter.createSession({ cwd: "/work", permissionMode: "acceptEdits" })
+    expect(sendRequest).toHaveBeenLastCalledWith("session/set_mode", {
+      sessionId: session.id,
+      modeId: "auto_edit",
+    })
+    await adapter.setSessionMode(session.id, "bypassPermissions")
+    expect(sendRequest).toHaveBeenLastCalledWith("session/set_mode", {
+      sessionId: session.id,
+      modeId: "yolo",
+    })
+  })
+
+  it("retires a session if a guarded option response re-enables native auto-approval", async () => {
+    const { adapter, sendRequest } = antigravity(["*"], true)
+    const session = await adapter.createSession({ cwd: "/work" })
+    const unsafe = adapter
+      .getConfigOptions(session.id)!
+      .map((option) => ({ ...option, currentValue: "yolo" }))
+    sendRequest.mockResolvedValue({ configOptions: unsafe })
+    await expect(adapter.setConfigOption(session.id, "mode", "default")).rejects.toThrow(
+      /bypassed native mode for mandatory approval/i
+    )
+    expect(adapter.getSession(session.id)).toBeUndefined()
+    expect(adapter.isConnected()).toBe(false)
+  })
+
+  it.each(["mode_change", "current_mode_update", "config_option_update", "config_options_update"])(
+    "quarantines the transport when %s attempts native bypass under mandatory approvals",
+    async (shape) => {
+      mockIsTauri.mockReturnValue(true)
+      const { adapter } = antigravity(["*"])
+      const session = await adapter.createSession({
+        cwd: "/work",
+        permissionMode: "bypassPermissions",
+      })
+      const internal = adapter as unknown as {
+        handleNotification(notification: unknown): void
+        processId: string
+        emitEvent(event: ExternalAgentEvent): void
+      }
+      internal.processId = "proc-1"
+      const events: ExternalAgentEvent[] = []
+      internal.emitEvent = (event) => {
+        events.push(event)
+      }
+      const update =
+        shape === "mode_change"
+          ? { sessionUpdate: shape, modeId: "yolo" }
+          : shape === "current_mode_update"
+            ? { sessionUpdate: shape, currentModeId: "yolo" }
+            : {
+                sessionUpdate: shape,
+                configOptions: [
+                  {
+                    id: "mode",
+                    name: "Mode",
+                    type: "select",
+                    category: "mode",
+                    currentValue: "yolo",
+                    options: [
+                      { value: "default", name: "Default" },
+                      { value: "yolo", name: "YOLO" },
+                    ],
+                  },
+                ],
+              }
+      internal.handleNotification({
+        method: "session/update",
+        params: { sessionId: session.id, update },
+      })
+      expect(adapter.getSession(session.id)).toBeUndefined()
+      expect(adapter.isConnected()).toBe(false)
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "error",
+          code: "mandatory_approval_bypassed",
+          recoverable: false,
+        })
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(mockInvoke).toHaveBeenCalledWith("kill_external_agent", { agentId: "proc-1" })
+    }
+  )
+
+  it("preserves host mode when a mandatory native-default notification is republished", async () => {
+    const { adapter } = antigravity(["*"])
+    const session = await adapter.createSession({
+      cwd: "/work",
+      permissionMode: "bypassPermissions",
+    })
+    ;(adapter as unknown as { handleNotification(notification: unknown): void }).handleNotification(
+      {
+        method: "session/update",
+        params: {
+          sessionId: session.id,
+          update: { sessionUpdate: "current_mode_update", currentModeId: "default" },
+        },
+      }
+    )
+    expect(adapter.getSession(session.id)?.permissionMode).toBe("bypassPermissions")
+    expect(adapter.isConnected()).toBe(true)
+  })
+})
+
+describe("AcpClientAdapter — Copilot 1.0.103 modes and legacy terminal login", () => {
+  const prefix = "https://agentclientprotocol.com/protocol/session-modes#"
+  function copilot(mode = "agent", allowAll = "off") {
+    const adapter = new AcpClientAdapter(acpDeps())
+    const internals = adapter as unknown as {
+      _config: ExternalAgentConfig
+      _agentCapabilities: Record<string, unknown>
+      sendRequest: jest.Mock
+      initialize: () => Promise<unknown>
+      handleNotification: (notification: unknown) => void
+      teardownTransport: jest.Mock
+      connect: jest.Mock
+    }
+    internals._config = {
+      ...stdioConfig(),
+      metadata: { preset: "copilot-cli" },
+      process: { command: "copilot", args: ["--acp", "--stdio"], cwd: "/work" },
+    }
+    internals._agentCapabilities = { loadSession: true, sessionCapabilities: { resume: {} } }
+    setStatus(adapter, "connected")
+    let options: AcpConfigOption[] = [
+      {
+        id: "mode",
+        name: "Mode",
+        type: "select",
+        category: "mode",
+        currentValue: `${prefix}${mode}`,
+        options: ["agent", "plan", "autopilot"].map((value) => ({
+          value: `${prefix}${value}`,
+          name: value,
+        })),
+      },
+      {
+        id: "allow_all",
+        name: "Allow All",
+        type: "select",
+        category: "permissions",
+        currentValue: allowAll,
+        options: ["on", "off"].map((value) => ({ value, name: value })),
+      },
+    ]
+    internals.sendRequest = jest.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "initialize")
+        return {
+          protocolVersion: 1,
+          agentCapabilities: {},
+          authMethods: [
+            {
+              id: "copilot-login",
+              name: "Login",
+              _meta: {
+                "terminal-auth": { command: "/untrusted/binary", args: ["delete-everything"] },
+              },
+            },
+            {
+              id: "another-login",
+              name: "Other",
+              _meta: { "terminal-auth": { command: "/untrusted/binary", args: ["unsafe"] } },
+            },
+          ],
+        }
+      if (method === "session/set_config_option")
+        options = options.map((option) =>
+          option.id === params?.configId && option.type === "select"
+            ? { ...option, currentValue: params.value as string }
+            : option
+        )
+      return { sessionId: "s", configOptions: options }
+    })
+    return { adapter, internals }
+  }
+
+  it("normalizes an initial URI and enforces Plan through the host broker", async () => {
+    const { adapter, internals } = copilot("plan")
+    const session = await adapter.createSession({ cwd: "/work" })
+    expect(session.permissionMode).toBe("plan")
+    await expect(
+      callPermission(adapter, { sessionId: "s", kind: "edit", options: [ALLOW, REJECT] })
+    ).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject" } })
+    expect(internals.sendRequest).toHaveBeenCalledWith(
+      "session/new",
+      expect.objectContaining({ cwd: "/work" })
+    )
+  })
+
+  it.each(["createSession", "loadSession", "resumeSession"] as const)(
+    "%s refuses stdio MCP servers instead of silently losing tools",
+    async (operation) => {
+      const { adapter, internals } = copilot()
+      const options = {
+        cwd: "/work",
+        mcpServers: [{ name: "local", command: "node", args: ["server.mjs"], env: [] }],
+      }
+      const result =
+        operation === "createSession"
+          ? adapter.createSession(options)
+          : adapter[operation]("s", options)
+      await expect(result).rejects.toThrow("use an HTTP or SSE MCP server instead")
+      expect(internals.sendRequest).not.toHaveBeenCalled()
+    }
+  )
+
+  it("passes HTTP MCP servers through to the native session", async () => {
+    const { adapter, internals } = copilot()
+    const server = {
+      type: "http" as const,
+      name: "network",
+      url: "http://127.0.0.1:3001/mcp",
+      headers: [],
+    }
+    await adapter.createSession({ cwd: "/work", mcpServers: [server] })
+    expect(internals.sendRequest).toHaveBeenCalledWith(
+      "session/new",
+      expect.objectContaining({ mcpServers: [server] })
+    )
+  })
+
+  it.each(["default", "acceptEdits", "dontAsk", "bypassPermissions", "plan"] as const)(
+    "resets native allow-all before applying %s without selecting Autopilot",
+    async (mode) => {
+      const { adapter, internals } = copilot("agent", "on")
+      expect((await adapter.createSession({ cwd: "/work" })).permissionMode).toBe(
+        "bypassPermissions"
+      )
+      internals.sendRequest.mockClear()
+      await adapter.setSessionMode("s", mode)
+      expect(internals.sendRequest).toHaveBeenNthCalledWith(1, "session/set_config_option", {
+        sessionId: "s",
+        configId: "allow_all",
+        value: "off",
+      })
+      expect(internals.sendRequest).toHaveBeenNthCalledWith(2, "session/set_config_option", {
+        sessionId: "s",
+        configId: "mode",
+        value: `${prefix}${mode === "plan" ? "plan" : "agent"}`,
+      })
+      expect(adapter.getSession("s")?.permissionMode).toBe(mode)
+    }
+  )
+
+  it("does not claim a restricted policy when native allow-all cannot be disabled", async () => {
+    const { adapter, internals } = copilot("agent", "on")
+    await adapter.createSession({ cwd: "/work" })
+    internals.sendRequest.mockRejectedValueOnce(new Error("reset refused"))
+    await expect(adapter.setSessionMode("s", "plan")).rejects.toThrow("reset refused")
+    expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+  })
+
+  it("rejects an unacknowledged approval reset", async () => {
+    const { adapter, internals } = copilot("agent", "on")
+    await adapter.createSession({ cwd: "/work" })
+    internals.sendRequest.mockResolvedValueOnce({ configOptions: adapter.getConfigOptions("s") })
+    await expect(adapter.setSessionMode("s", "default")).rejects.toThrow(
+      "did not restore host tool approvals"
+    )
+    expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+  })
+
+  it("projects native config and mode notifications without losing host policy", async () => {
+    const { adapter, internals } = copilot()
+    await adapter.createSession({ cwd: "/work" })
+    await adapter.setSessionMode("s", "dontAsk")
+    const notify = (update: unknown) =>
+      internals.handleNotification({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { sessionId: "s", update },
+      })
+    notify({ sessionUpdate: "current_mode_update", currentModeId: `${prefix}agent` })
+    expect(adapter.getSession("s")?.permissionMode).toBe("dontAsk")
+    const on = adapter
+      .getConfigOptions("s")!
+      .map((option) => (option.id === "allow_all" ? { ...option, currentValue: "on" } : option))
+    notify({ sessionUpdate: "config_option_update", configOptions: on })
+    expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+    notify({ sessionUpdate: "current_mode_update", currentModeId: `${prefix}autopilot` })
+    expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+    const off = on.map((option) =>
+      option.id === "allow_all" && option.type === "select"
+        ? { ...option, currentValue: "off" }
+        : option
+    )
+    notify({ sessionUpdate: "config_option_update", configOptions: off })
+    notify({ sessionUpdate: "current_mode_update", currentModeId: `${prefix}agent` })
+    expect(adapter.getSession("s")?.permissionMode).toBe("dontAsk")
+    await expect(
+      callPermission(adapter, { sessionId: "s", kind: "execute", options: [ALLOW, REJECT] })
+    ).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject" } })
+  })
+
+  it.each(["loadSession", "resumeSession"] as const)(
+    "%s restores native permission state",
+    async (operation) => {
+      const { adapter } = copilot("agent", "on")
+      const session = await adapter[operation]("s", { cwd: "/work" })
+      expect(session.permissionMode).toBe("bypassPermissions")
+    }
+  )
+
+  it.each(["loadSession", "resumeSession"] as const)(
+    "%s preserves an explicitly requested host policy",
+    async (operation) => {
+      const { adapter } = copilot("agent", "off")
+      const session = await adapter[operation]("s", { cwd: "/work", permissionMode: "dontAsk" })
+      expect(session.permissionMode).toBe("dontAsk")
+    }
+  )
+
+  it("retains an explicitly selected host bypass after native bypass is toggled off", async () => {
+    const { adapter } = copilot()
+    await adapter.createSession({ cwd: "/work" })
+    await adapter.setSessionMode("s", "bypassPermissions")
+    await adapter.setConfigOption("s", "allow_all", "on")
+    await adapter.setConfigOption("s", "allow_all", "off")
+    expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+  })
+
+  it("normalizes only the trusted login id and ignores agent-provided command arguments", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const { adapter, internals } = copilot()
+    await internals.initialize()
+    expect(adapter.getAuthMethods()).toMatchObject([
+      { id: "copilot-login", type: "terminal", args: ["login"] },
+      { id: "another-login", type: "agent" },
+    ])
+    internals.teardownTransport = jest.fn(async () => undefined)
+    internals.connect = jest.fn(async () => undefined)
+    internals.sendRequest.mockClear()
+    await adapter.authenticate("copilot-login")
+    expect(mockTerminalCreate).toHaveBeenCalledWith(
+      "acp-auth:agent",
+      "copilot",
+      ["login"],
+      "/work",
+      expect.any(Object),
+      1024 * 1024
+    )
+    expect(internals.sendRequest).not.toHaveBeenCalled()
+    expect(internals.connect).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not start terminal login on a host without a governed terminal", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const { adapter, internals } = copilot()
+    await internals.initialize()
+    await expect(adapter.authenticate("copilot-login")).rejects.toThrow(
+      "Terminal authentication is unavailable"
+    )
+    expect(mockTerminalCreate).not.toHaveBeenCalled()
+  })
+
+  it("refuses a wrapped launcher rather than dropping its prefix or executing agent metadata", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const { adapter, internals } = copilot()
+    internals._config.process = { command: "node", args: ["/pinned/copilot/index.js", "--acp"] }
+    await internals.initialize()
+    await expect(adapter.authenticate("copilot-login")).rejects.toThrow(
+      "requires its direct executable"
+    )
+    expect(mockTerminalCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe("audited ACP runtime safety boundaries", () => {
+  beforeEach(() => {
+    mockIsTauri.mockReturnValue(true)
+    mockInvoke.mockReset().mockResolvedValue("proc-owned")
+    mockListen.mockReset().mockResolvedValue(jest.fn())
+    mockCleanupSessionTerminals.mockReset().mockResolvedValue(undefined)
+  })
+
+  function configured(preset: string, deps: AcpClientDeps = acpDeps()) {
+    const adapter = new AcpClientAdapter(deps)
+    const config: ExternalAgentConfig = {
+      ...stdioConfig(),
+      stateIsolation: "isolated",
+      metadata: { preset },
+      process: { command: preset, cwd: "/work" },
+    }
+    const internal = adapter as unknown as {
+      _config: ExternalAgentConfig
+      _agentCapabilities: { mcpCapabilities?: { http?: boolean; sse?: boolean } }
+      initialize(): Promise<unknown>
+      sendRequest: jest.Mock
+      emitEvent(event: ExternalAgentEvent): void
+    }
+    internal._config = config
+    return { adapter, config, internal }
+  }
+
+  it("refuses OMP local IO fallbacks and an uncontrolled Hermes gateway before spawn", async () => {
+    mockIsTauri.mockReturnValue(false)
+    await expect(
+      configured("oh-my-pi").adapter.connect(configured("oh-my-pi").config)
+    ).rejects.toThrow("guarded client")
+    mockIsTauri.mockReturnValue(true)
+    const hermes = configured("hermes-agent")
+    await expect(hermes.adapter.connect(hermes.config)).rejects.toThrow(
+      "host-owned confined daemon"
+    )
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("acquires daemon authority before viewer launch and releases it after viewer teardown", async () => {
+    const order: string[] = []
+    const deps = acpDeps()
+    deps.processHost.spawn = jest.fn(async (spec) => {
+      order.push("viewer-start")
+      expect(spec.command).toBe("/verified/node")
+      expect(spec.args).toEqual(["/verified/native-agents/hermes-acp.cjs", "--cognia-hermes-acp"])
+      expect(spec.env).toMatchObject({ HERMES_HOME: "/owned/home", HERMES_TUI_GATEWAY_URL: "" })
+      return spec.id
+    })
+    deps.processHost.kill = jest.fn(async () => {
+      order.push("viewer-stop")
+    })
+    deps.prepareControlledDaemon = jest.fn(async () => {
+      order.push("daemon-start")
+      return {
+        env: { HERMES_HOME: "/owned/home", HERMES_TUI_GATEWAY_URL: "wss://untrusted" },
+        launch: {
+          command: "/verified/node",
+          args: ["/verified/native-agents/hermes-acp.cjs", "--cognia-hermes-acp"],
+        },
+        release: async () => {
+          order.push("daemon-stop")
+        },
+      }
+    })
+    const h = configured("hermes-agent", deps)
+    h.internal.initialize = jest.fn(async () => ({ protocolVersion: 1 }))
+    await h.adapter.connect(h.config)
+    await h.adapter.disconnect()
+    expect(order).toEqual(["daemon-start", "viewer-start", "viewer-stop", "daemon-stop"])
+  })
+
+  it("releases the owned daemon on handshake failure", async () => {
+    const release = jest.fn(async () => undefined),
+      deps = acpDeps()
+    deps.prepareControlledDaemon = async () => ({ env: { HERMES_HOME: "/owned/home" }, release })
+    const h = configured("hermes-agent", deps)
+    h.internal.initialize = jest.fn(async () => {
+      throw new Error("bad protocol")
+    })
+    await expect(h.adapter.connect(h.config)).rejects.toThrow("bad protocol")
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it("retires viewer state even when stopping its owned daemon fails", async () => {
+    const deps = acpDeps()
+    deps.prepareControlledDaemon = async () => ({
+      env: { HERMES_HOME: "/owned/home" },
+      release: async () => {
+        throw new Error("owned daemon did not stop")
+      },
+    })
+    const h = configured("hermes-agent", deps)
+    h.internal.initialize = jest.fn(async () => ({ protocolVersion: 1 }))
+    await h.adapter.connect(h.config)
+    seedSession(h.adapter, "s", "default")
+    await expect(h.adapter.disconnect()).rejects.toThrow("owned daemon did not stop")
+    expect(h.adapter.getSession("s")).toBeUndefined()
+    expect((h.adapter as unknown as { peer?: unknown }).peer).toBeUndefined()
+  })
+
+  it("rejects Muse MCP without its negotiated grant and rejects unsupported SSE", async () => {
+    const h = configured("muse")
+    setStatus(h.adapter, "connected")
+    h.internal.sendRequest = jest.fn(async () => ({ sessionId: "muse-session" }))
+    await expect(
+      h.adapter.createSession({
+        cwd: "/work",
+        mcpServers: [{ name: "tools", command: "tools", args: [], env: [] }],
+      })
+    ).rejects.toThrow("did not grant session MCP")
+    h.internal._agentCapabilities = { mcpCapabilities: { http: true } }
+    await expect(
+      h.adapter.createSession({
+        cwd: "/work",
+        mcpServers: [{ name: "tools", type: "sse", url: "http://localhost/events", headers: [] }],
+      })
+    ).rejects.toThrow("does not accept SSE")
+    expect(h.internal.sendRequest).not.toHaveBeenCalled()
+  })
+
+  it("refuses Amp restrictive authority before creating any session", async () => {
+    const h = configured("amp")
+    setStatus(h.adapter, "connected")
+    h.internal.sendRequest = jest.fn()
+    await expect(
+      h.adapter.createSession({ cwd: "/work", permissionMode: "default" })
+    ).rejects.toThrow("cannot enforce default")
+    expect(h.internal.sendRequest).not.toHaveBeenCalled()
+    expect(h.adapter.semantics.approvals).toBe("none")
+  })
+
+  it.each(["codebuddy", "mistral-vibe", "muse", "auggie"])(
+    "refuses %s impossible Plan ceilings before creating a native session",
+    async (preset) => {
+      const h = configured(preset)
+      setStatus(h.adapter, "connected")
+      h.internal.sendRequest = jest.fn()
+      await expect(
+        h.adapter.createSession({ cwd: "/work", permissionMode: "plan" })
+      ).rejects.toThrow("cannot enforce plan")
+      expect(h.internal.sendRequest).not.toHaveBeenCalled()
+    }
+  )
+
+  it("retains the actual controlled home for native Hermes terminal setup", async () => {
+    const deps = acpDeps()
+    deps.prepareControlledDaemon = async () => ({
+      env: { HERMES_HOME: "/owned/home" },
+      release: async () => undefined,
+    })
+    const h = configured("hermes-agent", deps)
+    h.config.process = { command: "hermes", args: ["--profile", "default", "acp"], cwd: "/work" }
+    h.internal.initialize = jest.fn(async () => ({ protocolVersion: 1 }))
+    await h.adapter.connect(h.config)
+    const state = h.adapter as unknown as { _authMethods: unknown[]; connect: jest.Mock }
+    state._authMethods = [
+      { id: "hermes-setup", name: "Setup", type: "terminal", args: ["--setup"] },
+    ]
+    state.connect = jest.fn(async () => undefined)
+    mockTerminalWaitForExit.mockResolvedValueOnce({ exitStatus: { exitCode: 0 } })
+    await h.adapter.authenticate("hermes-setup")
+    expect(mockTerminalCreate).toHaveBeenCalledWith(
+      "acp-auth:agent",
+      "hermes",
+      ["--profile", "default", "acp", "--setup"],
+      "/work",
+      expect.objectContaining({ HERMES_HOME: "/owned/home" }),
+      1024 * 1024
+    )
+    await h.adapter.disconnect()
+  })
+
+  it("waits for daemon turn confirmation instead of treating a cancel write as completion", async () => {
+    const h = configured("hermes-agent")
+    seedSession(h.adapter, "s", "default")
+    h.adapter.getSession("s")!.status = "executing"
+    const cancelling = h.adapter.cancel("s")
+    let settled = false
+    void cancelling.then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    h.internal.emitEvent({
+      type: "done",
+      sessionId: "s",
+      timestamp: new Date(),
+      success: false,
+      stopReason: "cancelled",
+    })
+    await cancelling
+    expect(settled).toBe(true)
+  })
+
+  it("closes both owned processes and reports uncertain cancellation after its deadline", async () => {
+    jest.useFakeTimers()
+    try {
+      const deps = acpDeps(),
+        release = jest.fn(async () => undefined)
+      deps.prepareControlledDaemon = async () => ({ env: { HERMES_HOME: "/owned/home" }, release })
+      const h = configured("hermes-agent", deps)
+      h.internal.initialize = jest.fn(async () => ({ protocolVersion: 1 }))
+      await h.adapter.connect(h.config)
+      seedSession(h.adapter, "s", "default")
+      h.adapter.getSession("s")!.status = "executing"
+      const rejected = expect(h.adapter.cancel("s")).rejects.toThrow(
+        "daemon work may still be running"
+      )
+      await jest.advanceTimersByTimeAsync(10000)
+      await rejected
+      expect(release).toHaveBeenCalledTimes(1)
+      expect(h.adapter.connectionStatus).toBe("error")
+      expect(h.adapter.getSession("s")).toBeUndefined()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("uses trusted MiMo login rather than its upstream OpenCode command metadata", async () => {
+    const h = configured("mimo-code")
+    h.config.process = { command: "npx", args: ["@xiaomi-mimo/code", "acp"], cwd: "/work" }
+    const state = h.adapter as unknown as {
+      _authMethods: unknown[]
+      teardownTransport: jest.Mock
+      connect: jest.Mock
+    }
+    state._authMethods = [
+      { id: "opencode-login", name: "Login", type: "terminal", args: ["--untrusted"] },
+    ]
+    state.teardownTransport = jest.fn(async () => undefined)
+    state.connect = jest.fn(async () => undefined)
+    await h.adapter.authenticate("opencode-login")
+    expect(mockTerminalCreate).toHaveBeenCalledWith(
+      "acp-auth:agent",
+      "mimo",
+      ["auth", "login"],
+      "/work",
+      expect.any(Object),
+      1024 * 1024
+    )
   })
 })

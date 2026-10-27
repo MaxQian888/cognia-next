@@ -23,7 +23,7 @@ import {
  * place and testable, instead of duplicated across the Tauri command and the
  * Node backend where the two could drift.
  *
- * @see runtime/deepseek-harness/README.md
+ * @see packages/agent-dsh/runtime/README.md
  */
 
 /** Filesystem facts a caller gathers before asking for a verdict. */

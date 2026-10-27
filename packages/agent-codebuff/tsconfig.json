@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest"],
+    "incremental": false,
+    "ignoreDeprecations": "6.0",
+    // Only the packages this one may depend on. These `paths` replace the
+    // root's, so an `@/` import or an undeclared sibling fails to compile.
+    "paths": {
+      "@cognia/agent-contracts": ["../agent-contracts/src/index.ts"],
+      "@cognia/agent-contracts/*": ["../agent-contracts/src/*"],
+      "@cognia/agent-runtime-kit": ["../agent-runtime-kit/src/index.ts"],
+      "@cognia/agent-runtime-kit/*": ["../agent-runtime-kit/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -10,7 +10,7 @@ export type PetAnchor = "bottom-right" | "bottom-left" | "top-right" | "top-left
 export type PetMotionPreference = "auto" | "full" | "reduced"
 
 /** Kept structural so this leaf package has no dependency on app-local types. */
-export type PetSkinId = "svg" | "live2d" | "sprite-v2"
+export type PetSkinId = "svg" | "live2d" | "sprite-v2" | "media"
 
 /** How often the overlay pet starts a wander walk on its own. */
 export type PetWanderFrequency = "calm" | "normal" | "lively"
@@ -148,6 +148,8 @@ export interface PetSettings {
   activeLive2dModelId?: string
   /** Id of the active validated Codex-compatible v2 sprite pack. */
   activeSpritePackId?: string
+  /** Locally installed transparent video / frame-animation pack. */
+  activeMediaPackId?: string
   /** Transparent desktop-pet overlay window settings (Tauri only). */
   desktopPet?: PetDesktopOverlaySettings
   /**
@@ -200,7 +202,7 @@ export const DEFAULT_PET_WANDER: PetWanderSettings = {
 export const DEFAULT_PET_DESKTOP_OVERLAY: PetDesktopOverlaySettings = {
   enabled: true,
   clickThrough: true,
-  size: 128,
+  size: 256,
   position: null,
   wander: DEFAULT_PET_WANDER,
 }

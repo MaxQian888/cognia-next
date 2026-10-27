@@ -1,0 +1,72 @@
+# Cognia overlay over the official sdk-minimal bundle (0.2.1-rc.2).
+# Patch config replaces the whole upstream config; keep required values explicit.
+# Patch rows cannot replace a plugin name. Disable the local provider before
+# inserting the sandboxed provider; keep inherited attachment/tool service IDs.
+- id: filesystem
+  disabled: true
+
+- id: attachment-local
+  config:
+    dshHome: !!js process.env.DSH_HOME
+
+- id: tool-fs
+  config:
+    read: true
+    readImage: true
+    write: true
+    edit: true
+
+- id: working-directory
+  config:
+    defaultDirectory: !!js process.env.COGNIA_DSH_WORKSPACE
+
+- id: llm-deepseek
+  disabled: !!js process.env.COGNIA_DSH_PROVIDER === 'cognia'
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    defaultContextWindow: !!js Number(process.env.COGNIA_DSH_CONTEXT_WINDOW ?? 1000000)
+    streamIdleTimeoutMs: 172800000
+
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    personaPrefix: !!js process.env.COGNIA_DSH_PERSONA ?? 'You are a helpful software engineering assistant.'
+
+- id: sessions
+  config:
+    root: !!js process.env.COGNIA_DSH_SESSION_ROOT
+    compression: none
+
+- id: sandbox-policy
+  config:
+    mode: read-only
+    workspaceRoot: !!js process.env.COGNIA_DSH_WORKSPACE
+
+# No execution provider or approval service: escalation fails closed.
+- id: subprocess
+  disabled: true
+- id: pty
+  disabled: true
+- id: terminal-bash
+  disabled: true
+- id: terminal-pwsh
+  disabled: true
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: jobs
+  disabled: true
+
+- insert:
+    - id: fs-sandboxed
+      name: "@deepseek-ai/dsh-fs-sandbox"
+      config:
+        cwd: !!js process.env.COGNIA_DSH_WORKSPACE
+    - id: cognia-services
+      name: "./launcher.mjs"
+
+# Await governed tools and model route before claiming the SDK transport.
+- id: sdk-jsonrpc-server
+  inject: [sdkAppStartup, loader, cogniaServicesReady]

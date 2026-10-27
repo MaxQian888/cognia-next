@@ -15,6 +15,7 @@
 
 import type {
   AcpElicitationResponse,
+  AcpConfigOption,
   AcpPermissionMode,
   ExternalAgentConfig,
   ExternalAgentTokenUsage,
@@ -22,14 +23,24 @@ import type {
 
 /** How a vendor names permission modes on the wire. */
 export interface AcpVendorPermissionModes {
+  /** Canonical policies whose ceilings this integration can actually enforce. */
+  supportedCanonicalModes?: readonly AcpPermissionMode[]
   /** The wire mode for a canonical mode. */
   toNative(mode: AcpPermissionMode): string
   /**
    * The canonical mode for a wire mode the agent reported. `current` is the
-   * session's canonical mode, so a wire value several canonical modes share
-   * keeps the one the user chose.
+   * session's canonical mode (or its separately retained host policy when
+   * hostApprovalOption is present), so a shared wire value keeps the user's choice.
    */
-  toCanonical(nativeMode: string, current: AcpPermissionMode | undefined): AcpPermissionMode
+  toCanonical(
+    nativeMode: string,
+    current: AcpPermissionMode | undefined,
+    configOptions?: readonly AcpConfigOption[]
+  ): AcpPermissionMode
+  /** Reset a separate native approval switch before applying a host permission policy. */
+  hostApprovalOption?: Readonly<{ id: string; value: string }>
+  /** Native mode retaining host permission requests when configuration rules require approval. */
+  mandatoryApprovalMode?: string
   /**
    * Refuse a mode the session does not advertise instead of sending it.
    * `fallback` is the wire set assumed when the agent advertised none.
@@ -51,11 +62,46 @@ export interface AcpVendorProfile {
   label: string
   /** Executable basenames (without `.exe`) that select the profile for hand-made configs. */
   commandNames: readonly string[]
+  /** Vendor capabilities implemented by this client, never copied from agent input. */
+  clientCapabilitiesMeta?: Readonly<Record<string, unknown>>
+  toolMetadata?(
+    meta: Record<string, unknown> | null | undefined,
+    sessionId: string
+  ): import("@cognia/agent-contracts/external-agent").ExternalAgentToolMetadata | undefined
+  notification?(
+    method: string,
+    params: Record<string, unknown>,
+    timestamp: Date
+  ): import("@cognia/agent-contracts/external-agent").ExternalAgentEvent | null
   permissionModes?: AcpVendorPermissionModes
+  /** Namespace containing `{systemPrompt: {append}}` on session setup requests. */
+  systemPromptNamespace?: string
+  /** Reapply host permission mode before exposing a newly created/restored session. */
+  reapplySessionMode?: boolean
   /** Environment forced at launch, over the configuration's own values. */
   launchEnv?: Readonly<Record<string, string>>
+  /** Reject configuration authority the vendor cannot enforce before starting its process. */
+  validateConfiguration?(config: ExternalAgentConfig): void
+  /** Reject vendor config switches that would escape the host's execution boundary. */
+  validateConfigOption?(id: string, value: string | boolean): void
+  /** Native tools rely on these guarded client ports, rather than a local fallback. */
+  requiresGuardedClientPorts?: boolean
+  /** The execution owner is outside the viewer; host must prove it owns and confines it. */
+  requiresControlledDaemon?: boolean
+  /** Vendor uses this negotiated transport capability as its all-session-MCP grant. */
+  requiresSessionMcpHttpGrant?: boolean
+  /** Runtime-specific truth that is weaker than the shared ACP default. */
+  semantics?: import("@cognia/agent-contracts/semantics").AgentExecutionSemantics
+  /** Daemon execution must acknowledge stop; killing only its viewer is insufficient. */
+  cancelAcknowledgementTimeoutMs?: number
+  /** SSE is not interchangeable with streamable HTTP for these agents. */
+  sseMcpServersUnsupported?: string
+  /** Trusted legacy terminal-auth mapping; never execute commands supplied in agent metadata. */
+  terminalAuth?: Readonly<{ methodId: string; command?: string; args: readonly string[] }>
   /** Set when the agent ignores session MCP servers; creating a session with any is refused. */
   sessionMcpServersUnsupported?: string
+  /** Set when the agent rejects client-supplied stdio MCP servers but accepts network transports. */
+  stdioMcpServersUnsupported?: string
   /** Prompt capabilities the agent advertises but does not honour. */
   promptCapabilityOverrides?: Readonly<{ image?: boolean }>
   /** The agent's compaction command starts background work it never reports finishing. */

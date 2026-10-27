@@ -23,7 +23,7 @@ export interface DshTransportLaunch {
 
 export class DshRuntimeUnavailableError extends Error {}
 
-/** Defaults matching `runtime/deepseek-harness/host.sdk-readonly.yml`. */
+/** Defaults matching `packages/agent-dsh/runtime/host.sdk-readonly.yml`. */
 const DEFAULT_PROVIDER = "deepseek-official"
 const DEFAULT_MODEL = "deepseek-flash"
 

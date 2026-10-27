@@ -142,6 +142,7 @@ export interface ResolvedCompaction {
      */
     providerId?: string
     credentials?: {
+      protocol?: string
       apiKey?: string
       baseURL?: string
       apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
@@ -278,7 +279,11 @@ export {
   type AgentSettingSource,
 } from "./agent-modes"
 
+import type { VerificationBudgetStamp } from "./execution-budget"
+export type { VerificationBudgetStamp, VerificationRuntimeConfig } from "./execution-budget"
+
 export type SendOptions = {
+  verificationBudget?: VerificationBudgetStamp
   /** Standalone hosts use the existing session-owned process supervisor. */
   backgroundProcessHost?: "sidecar" | "host"
   /**

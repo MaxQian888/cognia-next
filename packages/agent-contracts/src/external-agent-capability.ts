@@ -38,6 +38,11 @@ export type BuiltinExecutableExternalAgentProtocol =
   | "dsh-sdk"
   | "pi-rpc"
   | "aider-cli"
+  | "openclaude-cli"
+  | "crush-http"
+  | "continue-cli"
+  | "rovo-http"
+  | "codebuff-sdk"
   | "opencode-v2"
   | "opencode"
   | "a2a"
@@ -50,6 +55,11 @@ export const BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS: readonly BuiltinExecut
     "dsh-sdk",
     "pi-rpc",
     "aider-cli",
+    "openclaude-cli",
+    "crush-http",
+    "continue-cli",
+    "rovo-http",
+    "codebuff-sdk",
     "opencode-v2",
     "opencode",
     "a2a",

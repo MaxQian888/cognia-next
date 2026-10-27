@@ -6,6 +6,11 @@ DeepSeek Harness integration (ADR-0217): the `dsh-sdk` protocol adapter
 runtime channel, installer facts and managed-launch preparation, and the
 integration manifest (`./manifest`, pure data).
 
+`runtime/` owns the managed launcher, profile overlays, pinned upstream dependency
+manifest, and Node launcher/smoke tests. Its dependencies are installed into an
+isolated runtime home, never into the pnpm workspace. The package includes the
+launcher and profiles as assets; they are not imported by the browser adapter.
+
 The managed release is `0.2.1-rc.2` (conformance suite 4). SDK prompt
 admission is followed by `session/wait`: root idle alone does not complete a
 Cognia turn while managed descendants are still progressing. Job lifecycle and

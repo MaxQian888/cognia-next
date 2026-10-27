@@ -58,6 +58,7 @@ import {
   isExternalAgentSessionExtensionUnsupportedForMethod,
 } from "@cognia/agent-runtime-kit/session-extension-errors"
 import { deriveAcpPermissionInput } from "./permission-input"
+import { createGooseSessionControls, type GooseSessionControls } from "./goose-session"
 import type { ExternalAgentCompactionOptions } from "@cognia/agent-contracts/session-operations"
 import type {
   InitializeRequest as SdkInitializeRequest,
@@ -385,6 +386,13 @@ export interface AcpClientDeps {
    * Defaults to the profiles this package ships; a host may add its own.
    */
   vendorProfiles?: readonly AcpVendorProfile[]
+  /** Acquire a host-owned foreground daemon; release kills/reaps that owner. */
+  prepareControlledDaemon?: (config: ExternalAgentConfig) => Promise<{
+    env: Record<string, string>
+    /** Verified host-owned viewer helper; never accepted from agent metadata. */
+    launch?: { command: string; args: string[] }
+    release(): Promise<void>
+  }>
 }
 
 // ============================================================================
@@ -692,9 +700,20 @@ function normalizeAgentCapabilities(
 }
 
 function normalizeAuthMethods(
-  methods: AcpInitializeResult["authMethods"]
+  methods: AcpInitializeResult["authMethods"],
+  terminalAuth?: AcpVendorProfile["terminalAuth"]
 ): AcpAuthMethod[] | undefined {
   return methods?.map((method) => {
+    if (terminalAuth?.methodId === method.id) {
+      return {
+        type: "terminal",
+        id: method.id,
+        name: method.name,
+        description: method.description ?? undefined,
+        args: [...terminalAuth.args],
+        _meta: method._meta ?? undefined,
+      }
+    }
     if ("type" in method && method.type === "terminal") {
       return {
         type: "terminal",
@@ -759,6 +778,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private readonly dynamicMcpHost: () => AcpDynamicMcpHostController | undefined
   private readonly log: AgentLogger
   private readonly vendorProfiles: readonly AcpVendorProfile[]
+  private readonly prepareControlledDaemon: AcpClientDeps["prepareControlledDaemon"]
+  private daemonLease?: Awaited<ReturnType<NonNullable<AcpClientDeps["prepareControlledDaemon"]>>>
 
   constructor(deps: AcpClientDeps) {
     super()
@@ -777,6 +798,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.dynamicMcpHost = deps.dynamicMcpHost
     this.log = deps.logger
     this.vendorProfiles = deps.vendorProfiles ?? ACP_VENDOR_PROFILES
+    this.prepareControlledDaemon = deps.prepareControlledDaemon
   }
 
   /**
@@ -784,6 +806,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * reaches an agent the host owns no process for.
    */
   get semantics(): AgentExecutionSemantics {
+    if (this.vendor?.semantics) return this.vendor.semantics
     return this._config && this._config.transport !== "stdio"
       ? ACP_REMOTE_EXECUTION_SEMANTICS
       : ACP_EXECUTION_SEMANTICS
@@ -882,6 +905,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * session restarts it, and it is paused while the agent is waiting on us.
    */
   private promptDeadlines = new Map<string, JsonRpcRequestDeadline>()
+  /** Host-selected authority is distinct from a vendor's temporary native bypass. */
+  private hostPermissionModes = new Map<string, AcpPermissionMode>()
   /**
    * Agent→client requests in flight per session (permission, elicitation,
    * terminal wait, …). While any is open the agent is waiting on the client —
@@ -922,9 +947,22 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   }
 
   private assertDynamicMcpServersSupported(servers: AcpMcpServerConfig[]): void {
+    if (
+      servers.length &&
+      this.vendor?.requiresSessionMcpHttpGrant &&
+      this._agentCapabilities?.mcpCapabilities?.http !== true
+    )
+      throw new Error(`${this.vendor.label} did not grant session MCP support`)
+    const sseUnsupported = this.vendor?.sseMcpServersUnsupported
+    if (sseUnsupported && servers.some((server) => "type" in server && server.type === "sse"))
+      throw new Error(sseUnsupported)
     const mcpUnsupported = this.vendor?.sessionMcpServersUnsupported
     if (mcpUnsupported && servers.length > 0) {
       throw new Error(mcpUnsupported)
+    }
+    const stdioUnsupported = this.vendor?.stdioMcpServersUnsupported
+    if (stdioUnsupported && servers.some((server) => "command" in server)) {
+      throw new Error(stdioUnsupported)
     }
     const dynamicServers = servers.filter(isAcpChannelMcpServer)
     if (dynamicServers.length === 0) return
@@ -1033,6 +1071,24 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this._config = config
+    this.vendor?.validateConfiguration?.(config)
+    if (this.vendor?.requiresGuardedClientPorts) {
+      const host = this.hostCapabilities()
+      if (
+        !host.fs.read ||
+        !host.fs.write ||
+        !host.terminal ||
+        !this.files.available ||
+        !this.terminals.available
+      )
+        throw new Error(
+          `${this.vendor.label} requires guarded client filesystem and terminal ports`
+        )
+    }
+    if (this.vendor?.requiresControlledDaemon && !this.prepareControlledDaemon)
+      throw new Error(
+        `${this.vendor.label} requires a host-owned confined daemon; an ACP viewer sandbox is insufficient`
+      )
     this._connectionStatus = "connecting"
     this.intentionalDisconnect = false
     this.applyRetryConfig(config)
@@ -1055,6 +1111,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     })
 
     try {
+      if (this.vendor?.requiresControlledDaemon)
+        this.daemonLease = await this.prepareControlledDaemon!(config)
       if (config.transport === "stdio") {
         await this.connectViaStdio(config)
       } else if (
@@ -1071,6 +1129,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       const initResult = await this.initialize()
       // Map agent capabilities to legacy format for backward compatibility
       this._capabilities = {
+        ...(this.vendor?.permissionModes?.supportedCanonicalModes
+          ? { permissionModes: [...this.vendor.permissionModes.supportedCanonicalModes] }
+          : {}),
         streaming: true,
         toolExecution: true,
         fileOperations: initResult.agentCapabilities?.promptCapabilities?.embeddedContext,
@@ -1125,52 +1186,61 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * between "disconnected" and "error". Idempotent.
    */
   private async teardownTransport(): Promise<void> {
-    this.cleanupListeners()
+    const daemonLease = this.daemonLease
+    this.daemonLease = undefined
+    try {
+      this.cleanupListeners()
 
-    if (this.processId && this.processHost.available) {
-      try {
-        await this.processHost.kill(this.processId)
-      } catch (error) {
-        this.log.warn("Error killing process", { error })
+      if (this.processId && this.processHost.available) {
+        try {
+          await this.processHost.kill(this.processId)
+        } catch (error) {
+          this.log.warn("Error killing process", { error })
+        }
       }
-    }
 
-    if (this.networkSocket) {
-      const socket = this.networkSocket
-      this.networkSocket = undefined
-      await socket.close().catch((error) => this.log.warn("Error closing ACP socket", { error }))
-    }
-    if (this.networkEventAbort) {
-      this.networkEventAbort.abort()
-      this.networkEventAbort = undefined
-    }
-    this._rpcEndpoint = undefined
-    this._eventsEndpoint = undefined
+      if (this.networkSocket) {
+        const socket = this.networkSocket
+        this.networkSocket = undefined
+        await socket.close().catch((error) => this.log.warn("Error closing ACP socket", { error }))
+      }
+      if (this.networkEventAbort) {
+        this.networkEventAbort.abort()
+        this.networkEventAbort = undefined
+      }
+      this._rpcEndpoint = undefined
+      this._eventsEndpoint = undefined
 
-    this.processId = undefined
-    for (const sessionId of new Set(this.terminalSessions.values())) {
-      await this.cleanupNativeSessionTerminals(sessionId)
+      this.processId = undefined
+      for (const sessionId of new Set(this.terminalSessions.values())) {
+        await this.cleanupNativeSessionTerminals(sessionId)
+      }
+      this._sessions.clear()
+      this.hostPermissionModes.clear()
+      this.presentationListeners.clear()
+      this.pendingForkMcpRebind.clear()
+      this.toolCallStates.clear()
+      this.terminalSessions.clear()
+      this.cumulativeUsage.clear()
+      this.turnStartUsage.clear()
+      this.primedUsageSessions.clear()
+      await this.cleanupDynamicMcpConnections()
+      this.dynamicMcpServerSessions.clear()
+      for (const [, pending] of this.pendingPermissions) {
+        clearTimeout(pending.timeout)
+        pending.resolve({ outcome: { outcome: "cancelled" } })
+      }
+      this.pendingPermissions.clear()
+      this.cancelPendingElicitations()
+      this.peer?.rejectAll("Disconnected")
+      this.peer = undefined
+      this.featureProfile = undefined
+      this.clearSessionExtensionSupportCache()
+    } finally {
+      // Release the execution authority after every viewer-side waiter has been
+      // retired. A failed daemon stop must not leave a live peer or approval.
+      await daemonLease?.release()
     }
-    this._sessions.clear()
-    this.presentationListeners.clear()
-    this.pendingForkMcpRebind.clear()
-    this.toolCallStates.clear()
-    this.terminalSessions.clear()
-    this.cumulativeUsage.clear()
-    this.turnStartUsage.clear()
-    this.primedUsageSessions.clear()
-    await this.cleanupDynamicMcpConnections()
-    this.dynamicMcpServerSessions.clear()
-    for (const [, pending] of this.pendingPermissions) {
-      clearTimeout(pending.timeout)
-      pending.resolve({ outcome: { outcome: "cancelled" } })
-    }
-    this.pendingPermissions.clear()
-    this.cancelPendingElicitations()
-    this.peer?.rejectAll("Disconnected")
-    this.peer = undefined
-    this.featureProfile = undefined
-    this.clearSessionExtensionSupportCache()
   }
 
   /**
@@ -1220,7 +1290,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // A vendor may need launch settings over the configuration's own, such as
     // starting with approval enabled before the manager applies the requested
     // session mode.
-    Object.assign(finalEnv, this.vendor?.launchEnv)
+    Object.assign(finalEnv, this.daemonLease?.env, this.vendor?.launchEnv)
 
     // Spawn the external agent process, reclaiming the id if a process from a
     // previous JS realm (page reload / dev Fast Refresh) is still registered
@@ -1230,9 +1300,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // resolves, so the orphan's exit event has nowhere to land.
     const spawnSpec: AgentProcessSpawnSpec = {
       id: config.id,
-      command: config.process.command,
+      command: this.daemonLease?.launch?.command ?? config.process.command,
       sandboxPolicy: config.sandboxPolicy,
-      args: finalArgs,
+      args: this.daemonLease?.launch?.args ?? finalArgs,
       env: finalEnv,
       cwd: config.process.cwd,
     }
@@ -1476,6 +1546,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private buildSessionRequestMeta(
     options?: SessionCreateOptions
   ): AcpSessionRequestMeta | undefined {
+    // A vendor without a safe equivalent must refuse before session setup.
+    if (this.vendor?.permissionModes) {
+      this.nativePermissionMode(options?.permissionMode ?? "default")
+    }
     const customContext = this.instructionContext(options?.context) || {}
     const instructionEnvelope = options?.instructionEnvelope
     const effectiveCwd =
@@ -1526,11 +1600,38 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           : undefined,
     }
 
+    const namespace = this.vendor?.systemPromptNamespace
+    if (namespace && meta.systemPrompt) {
+      Object.assign(meta, { [namespace]: { systemPrompt: meta.systemPrompt } })
+    }
+
     if (!meta.systemPrompt && !meta.claudeCode && !meta.codex && !meta.cognia) {
       return undefined
     }
 
     return meta
+  }
+
+  private async restoreSessionPermissionMode(
+    session: ExternalAgentSession,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
+    const optionsState = session.metadata?.configOptions as AcpConfigOption[] | undefined
+    for (const option of optionsState ?? [])
+      this.vendor?.validateConfigOption?.(option.id, option.currentValue)
+    if (!this.vendor?.reapplySessionMode) return session
+    try {
+      await this.setSessionMode(session.id, options?.permissionMode ?? "default")
+      return this._sessions.get(session.id)!
+    } catch (error) {
+      try {
+        await this.closeSession(session.id)
+      } finally {
+        this._sessions.delete(session.id)
+        this.hostPermissionModes.delete(session.id)
+      }
+      throw error
+    }
   }
 
   private buildSessionMetadata(
@@ -1590,6 +1691,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private async initialize(): Promise<AcpInitializeResult> {
     this.featureProfile = this.resolveFeatureProfile()
     const clientCapabilities: AcpClientCapabilities = this.featureProfile.clientCapabilities
+    if (this.vendor?.clientCapabilitiesMeta)
+      clientCapabilities._meta = {
+        ...clientCapabilities._meta,
+        ...this.vendor.clientCapabilitiesMeta,
+      }
     const params: AcpInitializeParams = {
       protocolVersion: LATEST_ACP_PROTOCOL_VERSION,
       clientCapabilities,
@@ -1635,7 +1741,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           title: result.agentInfo.title ?? undefined,
         }
       : undefined
-    this._authMethods = normalizeAuthMethods(result.authMethods)
+    this._authMethods = normalizeAuthMethods(result.authMethods, this.vendor?.terminalAuth)
 
     return result
   }
@@ -1702,6 +1808,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!profile.clientCapabilities.auth?.terminal) {
       throw new Error("Terminal authentication is unavailable on this host")
     }
+    const vendor = this.vendor
+    if (vendor?.terminalAuth?.methodId === method.id && !vendor.terminalAuth.command) {
+      const executable = config.process.command
+        .split(/[\\/]/)
+        .at(-1)
+        ?.replace(/\.exe$/i, "")
+        .toLowerCase()
+      if (!executable || !vendor.commandNames.includes(executable)) {
+        throw new Error(
+          `${vendor.label} terminal login requires its direct executable; run its native login separately for a wrapped launcher`
+        )
+      }
+    }
     if (this.terminalAuthPending) {
       throw new Error("Terminal authentication is already in progress")
     }
@@ -1715,18 +1834,26 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
     }
     try {
+      const controlledEnvironment = this.daemonLease?.env
       await this.teardownTransport()
       this._connectionStatus = "disconnected"
       assertNotCancelled()
       const env = await this.resolveLaunchEnvironment(config, {
         ...(config.process.env ?? {}),
         ...(method.env ?? {}),
+        ...controlledEnvironment,
       })
       assertNotCancelled()
       terminalId = await this.terminals.create({
         sessionId: `acp-auth:${config.id}`,
-        command: config.process.command,
-        args: [...buildSpawnArgs(config.process), ...(method.args ?? [])],
+        command:
+          this.vendor?.terminalAuth?.methodId === method.id
+            ? (this.vendor.terminalAuth.command ?? config.process.command)
+            : config.process.command,
+        args:
+          this.vendor?.terminalAuth?.methodId === method.id
+            ? [...this.vendor.terminalAuth.args]
+            : [...buildSpawnArgs(config.process), ...(method.args ?? [])],
         cwd: config.process.cwd,
         env: env,
         outputByteLimit: 1024 * 1024,
@@ -1976,6 +2103,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!this.isConnected()) {
       throw new Error("Not connected to agent")
     }
+    if (this.vendor?.permissionModes)
+      this.nativePermissionMode(options?.permissionMode ?? "default")
 
     const additionalDirectories = this.resolveAdditionalDirectories(options)
     const cwd = this.resolveSessionCwd(options)
@@ -2020,7 +2149,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       id: result.sessionId,
       agentId: this._config!.id,
       status: "active",
-      permissionMode: this.canonicalPermissionMode(initialMode),
+      permissionMode: this.canonicalPermissionMode(
+        initialMode,
+        undefined,
+        sessionConfigOptions,
+        options?.permissionMode
+      ),
       allowedTools: options?.allowedTools,
       capabilities: this._capabilities,
       tools: this._tools ?? [],
@@ -2038,10 +2172,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this._sessions.set(session.id, session)
+    this.hostPermissionModes.set(session.id, options?.permissionMode ?? "default")
     this.registerDynamicMcpServers(session.id, mcpServers)
 
     this.log.info("Created session", { sessionId: session.id })
-    return session
+    return this.restoreSessionPermissionMode(session, options)
   }
 
   /**
@@ -2085,6 +2220,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.hostPermissionModes.delete(sessionId)
     this.presentationListeners.delete(sessionId)
     this.pendingForkMcpRebind.delete(sessionId)
     this.clearUsageTracking(sessionId)
@@ -2122,6 +2258,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
+    this.hostPermissionModes.delete(sessionId)
     this.presentationListeners.delete(sessionId)
     this.pendingForkMcpRebind.delete(sessionId)
     this.clearUsageTracking(sessionId)
@@ -2481,6 +2618,41 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       return
     }
 
+    const acknowledgementTimeout = this.vendor?.cancelAcknowledgementTimeoutMs
+    // Subscribe before writing: a daemon can settle synchronously. Only the
+    // authoritative prompt response proves stop, never the viewer's exit.
+    let releaseAcknowledgement: (() => void) | undefined
+    const acknowledged = acknowledgementTimeout
+      ? new Promise<void>((resolve, reject) => {
+          const listeners = this.eventListeners.get(sessionId) ?? new Set()
+          const listener = (event: ExternalAgentEvent) => {
+            if (event.type === "done") resolve()
+            else if (event.type === "error")
+              reject(
+                new Error(`${this.vendor?.label} cancellation was not confirmed: ${event.error}`)
+              )
+            else return
+            releaseAcknowledgement?.()
+          }
+          const timer = setTimeout(() => {
+            releaseAcknowledgement?.()
+            reject(
+              new Error(
+                `${this.vendor?.label} cancellation was not confirmed before timeout; daemon work may still be running`
+              )
+            )
+          }, acknowledgementTimeout)
+          listeners.add(listener)
+          this.eventListeners.set(sessionId, listeners)
+          releaseAcknowledgement = () => {
+            clearTimeout(timer)
+            listeners.delete(listener)
+            if (!listeners.size) this.eventListeners.delete(sessionId)
+          }
+        })
+      : undefined
+    // Mark handled while the terminal cleanup below is in flight.
+    void acknowledged?.catch(() => undefined)
     // session/cancel is a notification, not a request
     this.sendNotification("session/cancel", { sessionId })
     // ACP requires an outstanding permission request to resolve as cancelled
@@ -2498,6 +2670,18 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.cancelPendingElicitations(sessionId)
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
+    if (acknowledged) {
+      try {
+        await acknowledged
+      } catch (error) {
+        this._connectionStatus = "error"
+        this.intentionalDisconnect = true
+        await this.teardownTransport()
+        throw error
+      } finally {
+        releaseAcknowledgement?.()
+      }
+    }
     // Keep the turn executing until the authoritative session/prompt response
     // arrives. Agents may legally stream late updates after session/cancel.
   }
@@ -2713,15 +2897,76 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     return resolveAcpVendorProfile(this._config, this.vendorProfiles)
   }
 
-  private nativePermissionMode(modeId: AcpPermissionMode): string {
-    return this.vendor?.permissionModes?.toNative(modeId) ?? modeId
+  get gooseSessionControls(): GooseSessionControls | undefined {
+    // Base ACP remains available to older Goose releases. Child recovery uses
+    // the versioned native delegate/export contract; unknown versions fail closed.
+    const version = /^v?1\.(\d+)\.\d+(?:\+[\w.-]+)?$/.exec(this._agentInfo?.version ?? "")
+    if (this.vendor?.id !== "goose" || !version || Number(version[1]) < 56) return undefined
+    return createGooseSessionControls({
+      request: (method, params) => this.sendRequest(method, params),
+      hasParent: (id) => this._sessions.has(id),
+      isBusy: (id) => this.promptDeadlines.has(id),
+      outboundGate: this.outboundGate,
+    })
   }
 
-  private canonicalPermissionMode(nativeMode: string, sessionId?: string): AcpPermissionMode {
+  private nativePermissionMode(modeId: AcpPermissionMode): string {
+    const native = this.vendor?.permissionModes?.toNative(modeId) ?? modeId
+    return this.mandatoryNativeApprovalMode() ?? native
+  }
+
+  private mandatoryNativeApprovalMode(): string | undefined {
+    return this._config?.requireApprovalFor?.length
+      ? this.vendor?.permissionModes?.mandatoryApprovalMode
+      : undefined
+  }
+
+  private retireNativeApprovalViolation(sessionId: string): Error {
+    const error = new Error(
+      `${this.vendor!.label} bypassed native mode for mandatory approval rules`
+    )
+    this.emitEvent({
+      type: "error",
+      sessionId,
+      timestamp: new Date(),
+      error: error.message,
+      code: "mandatory_approval_bypassed",
+      recoverable: false,
+    })
+    // The official server has no session/close capability. Stop the process,
+    // not just the local session mirror, before it can continue bypassing policy.
+    this.intentionalDisconnect = true
+    this._connectionStatus = "error"
+    this._sessions.clear()
+    this.hostPermissionModes.clear()
+    this.peer?.rejectAll(error.message)
+    void this.teardownTransport().catch((cleanupError) => {
+      this.log.error("Failed to retire unsafe ACP transport", { error: cleanupError })
+    })
+    return error
+  }
+
+  private canonicalPermissionMode(
+    nativeMode: string,
+    sessionId?: string,
+    configOptions?: readonly AcpConfigOption[] | null,
+    requestedMode?: AcpPermissionMode
+  ): AcpPermissionMode {
     const modes = this.vendor?.permissionModes
     if (!modes) return nativeMode as AcpPermissionMode
-    const current = sessionId ? this._sessions.get(sessionId)?.permissionMode : undefined
-    return modes.toCanonical(nativeMode, current)
+    const current =
+      requestedMode ??
+      (sessionId
+        ? modes.hostApprovalOption || this.mandatoryNativeApprovalMode()
+          ? (this.hostPermissionModes.get(sessionId) ?? "default")
+          : this._sessions.get(sessionId)?.permissionMode
+        : undefined)
+    if (this.mandatoryNativeApprovalMode() === nativeMode) return current ?? "default"
+    return modes.toCanonical(
+      nativeMode,
+      current,
+      configOptions ?? (sessionId ? this.getConfigOptions(sessionId) : undefined)
+    )
   }
 
   async setSessionMode(sessionId: string, modeId: AcpPermissionMode): Promise<void> {
@@ -2752,7 +2997,21 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         throw new Error(`${vendor.label} does not advertise permission mode: ${modeId}`)
     }
     if (modeOption) {
+      const approval = vendor?.permissionModes?.hostApprovalOption
+      const approvalOption =
+        approval && this.getConfigOptions(sessionId)?.find((option) => option.id === approval.id)
+      if (approval && approvalOption && approvalOption.currentValue !== approval.value) {
+        const updated = await this.setConfigOption(sessionId, approval.id, approval.value)
+        if (
+          !updated.some(
+            (option) => option.id === approval.id && option.currentValue === approval.value
+          )
+        ) {
+          throw new Error(`${vendor.label} did not restore host tool approvals`)
+        }
+      }
       await this.setConfigOption(sessionId, modeOption.id, nativeMode)
+      this.hostPermissionModes.set(sessionId, modeId)
       this.updateSession(sessionId, { permissionMode: modeId })
       return
     }
@@ -2760,6 +3019,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       sessionId,
       modeId: nativeMode,
     } as unknown as Record<string, unknown>)
+    this.hostPermissionModes.set(sessionId, modeId)
     this.updateSession(sessionId, { permissionMode: modeId })
   }
 
@@ -2852,6 +3112,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     configId: string,
     value: string | boolean
   ): Promise<AcpConfigOption[]> {
+    this.vendor?.validateConfigOption?.(configId, value)
     const session = this._sessions.get(sessionId)
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`)
@@ -2866,6 +3127,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!option) {
       throw new Error(
         `Unknown config option: ${configId}. Available: ${configOptions.map((o) => o.id).join(", ")}`
+      )
+    }
+
+    const mandatoryMode = this.mandatoryNativeApprovalMode()
+    if (mandatoryMode && option.category === "mode" && value !== mandatoryMode) {
+      throw new Error(
+        `${this.vendor!.label} must retain native ${mandatoryMode} mode for mandatory approval rules; change the Cognia permission mode instead`
       )
     }
 
@@ -2897,10 +3165,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // Update session metadata with new config state
     const updatedOptions = result.configOptions
+    for (const option of updatedOptions)
+      this.vendor?.validateConfigOption?.(option.id, option.currentValue)
+    const modeOpt = updatedOptions.find((opt) => opt.category === "mode")
+    if (mandatoryMode && modeOpt?.currentValue !== mandatoryMode) {
+      throw this.retireNativeApprovalViolation(sessionId)
+    }
     session.metadata = { ...session.metadata, configOptions: updatedOptions }
 
     // Sync mode from config options if applicable
-    const modeOpt = updatedOptions.find((opt) => opt.category === "mode")
     if (modeOpt && typeof modeOpt.currentValue === "string") {
       this.updateSession(sessionId, {
         permissionMode: this.canonicalPermissionMode(modeOpt.currentValue, sessionId),
@@ -2941,6 +3214,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Agents replay session/update and may call host methods before replying.
     // Install the session first so replay state and workspace confinement work.
     const previousSession = this._sessions.get(sessionId)
+    const previousHostMode = this.hostPermissionModes.get(sessionId)
     const session: ExternalAgentSession = {
       id: sessionId,
       agentId: this._config!.id,
@@ -2959,6 +3233,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this._sessions.set(session.id, session)
+    this.hostPermissionModes.set(
+      sessionId,
+      options?.permissionMode ?? previousHostMode ?? "default"
+    )
     // A loaded session's usage counters already carry history. Mark it so the
     // first cumulative sighting becomes the baseline rather than turn spend.
     this.primedUsageSessions.add(sessionId)
@@ -2979,17 +3257,22 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       )
       const nativeMode = modeOption?.currentValue ?? result?.modes?.currentModeId
       this.registerDynamicMcpServers(session.id, mcpServers)
-      return this.updateSession(sessionId, {
+      const loaded = this.updateSession(sessionId, {
         metadata,
         ...(typeof nativeMode === "string"
           ? {
-              permissionMode: this.canonicalPermissionMode(nativeMode, sessionId),
+              permissionMode: this.canonicalPermissionMode(nativeMode, sessionId, configOptions),
             }
           : {}),
       })!
+      return await this.restoreSessionPermissionMode(loaded, options)
     } catch (error) {
-      if (previousSession) this._sessions.set(sessionId, previousSession)
-      else this._sessions.delete(sessionId)
+      if (previousSession && !this.vendor?.reapplySessionMode) {
+        this._sessions.set(sessionId, previousSession)
+      } else this._sessions.delete(sessionId)
+      if (previousHostMode && !this.vendor?.reapplySessionMode) {
+        this.hostPermissionModes.set(sessionId, previousHostMode)
+      } else this.hostPermissionModes.delete(sessionId)
       this.primedUsageSessions.delete(sessionId)
       throw error
     }
@@ -3203,7 +3486,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
       this.registerDynamicMcpServers(forkedSession.id, mcpServers)
       this.setExtensionSupport(method, "supported", "ok")
-      return forkedSession
+      return await this.restoreSessionPermissionMode(forkedSession, sessionOptions)
     } catch (error) {
       if (
         isExternalAgentMethodNotFoundError(error) ||
@@ -3384,7 +3667,17 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         id: result.sessionId || sessionId,
         agentId: this._config!.id,
         status: "active",
-        permissionMode: (options?.permissionMode || "default") as AcpPermissionMode,
+        permissionMode: this.canonicalPermissionMode(
+          String(
+            result.configOptions?.find((option) => option.category === "mode")?.currentValue ??
+              result.modes?.currentModeId ??
+              options?.permissionMode ??
+              "default"
+          ),
+          undefined,
+          result.configOptions,
+          options?.permissionMode
+        ),
         capabilities: this._capabilities,
         tools: this._tools ?? [],
         messages: [],
@@ -3400,11 +3693,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         },
       }
       this._sessions.set(resumedSession.id, resumedSession)
+      this.hostPermissionModes.set(resumedSession.id, options?.permissionMode ?? "default")
       // A resumed session's usage counters already carry history.
       this.primedUsageSessions.add(resumedSession.id)
       this.registerDynamicMcpServers(resumedSession.id, mcpServers)
       this.setExtensionSupport(method, "supported", "ok")
-      return resumedSession
+      return await this.restoreSessionPermissionMode(resumedSession, options)
     } catch (error) {
       if (
         isExternalAgentMethodNotFoundError(error) ||
@@ -4387,6 +4681,26 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       return null
     }
 
+    const mandatoryMode = this.mandatoryNativeApprovalMode()
+    const reportedMode =
+      update.sessionUpdate === "mode_change"
+        ? update.modeId
+        : update.sessionUpdate === "current_mode_update"
+          ? update.currentModeId
+          : update.sessionUpdate === "config_option_update" ||
+              update.sessionUpdate === "config_options_update"
+            ? update.configOptions.find((option) => option.category === "mode")?.currentValue
+            : undefined
+    if (
+      mandatoryMode &&
+      this._sessions.has(sessionId) &&
+      reportedMode !== undefined &&
+      reportedMode !== mandatoryMode
+    ) {
+      this.retireNativeApprovalViolation(sessionId)
+      return null
+    }
+
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
         const messageId = update.messageId ?? this.currentTurnMessageId(sessionId)
@@ -4492,6 +4806,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           rawInput: update.rawInput,
           locations: update.locations,
           toolMetadata: {
+            ...this.vendor?.toolMetadata?.(
+              (update as unknown as CachedAcpToolCall)._meta,
+              sessionId
+            ),
             kind: update.kind,
             ...(update.locations ? { locations: update.locations } : {}),
           },
@@ -4544,6 +4862,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             locations: toolUpdate.locations,
             status: toolUpdate.status,
             toolMetadata: {
+              ...this.vendor?.toolMetadata?.(toolUpdate._meta, sessionId),
               ...(toolUpdate.kind ? { kind: toolUpdate.kind } : {}),
               ...(toolUpdate.locations ? { locations: toolUpdate.locations } : {}),
             },
@@ -4561,6 +4880,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         ) {
           return {
             type: "tool_call_update" as const,
+            toolMetadata: this.vendor?.toolMetadata?.(toolUpdate._meta, sessionId),
             sessionId,
             timestamp,
             toolCallId: toolUpdate.toolCallId,
@@ -4827,6 +5147,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       // tolerated alias. Both carry the full `configOptions` set.
       case "config_option_update":
       case "config_options_update": {
+        try {
+          for (const option of update.configOptions)
+            this.vendor?.validateConfigOption?.(option.id, option.currentValue)
+        } catch (error) {
+          this.retireNativeApprovalViolation(sessionId)
+          return {
+            type: "error",
+            sessionId,
+            timestamp,
+            error: error instanceof Error ? error.message : String(error),
+            recoverable: false,
+          }
+        }
         // Agent-initiated config options change
         const cfgSession = this._sessions.get(sessionId)
         const previousOptions = cfgSession?.metadata?.configOptions as AcpConfigOption[] | undefined
@@ -4982,6 +5315,28 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const params = notification.params || {}
     const sessionId = (params.sessionId as string) || ""
     const timestamp = new Date()
+    if (this._sessions.has(sessionId)) {
+      const event = this.vendor?.notification?.(notification.method, params, timestamp)
+      if (event) {
+        const session = this._sessions.get(sessionId)!
+        if (event.type === "extension_ui_update")
+          session.metadata = {
+            ...session.metadata,
+            extensionUi: reduceExternalAgentUiState(
+              (session.metadata?.extensionUi as
+                | import("@cognia/agent-contracts/external-agent").ExternalAgentUiState
+                | undefined) ?? createExternalAgentUiState(),
+              event
+            ),
+          }
+        if (event.type === "usage_update")
+          session.metadata = {
+            ...session.metadata,
+            usage: { used: event.used, size: event.size, cost: event.cost },
+          }
+        return event
+      }
+    }
 
     switch (notification.method as AcpNotificationType) {
       // Handle ACP session/update notifications (primary format per spec)
