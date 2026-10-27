@@ -69,6 +69,36 @@ describe("conversation-labels", () => {
     expect(first.every((l) => l.builtin)).toBe(true)
   })
 
+  it("seeds each built-in once when multiple consumers initialize concurrently", async () => {
+    const results = await Promise.allSettled(Array.from({ length: 4 }, () => seedBuiltinLabels()))
+
+    expect(results).toEqual(
+      Array.from({ length: 4 }, () => ({ status: "fulfilled", value: undefined }))
+    )
+    expect((await listLabels()).map((label) => label.id)).toEqual([
+      "lbl-builtin-follow-up",
+      "lbl-builtin-vip",
+      "lbl-builtin-bug",
+      "lbl-builtin-resolved",
+    ])
+  })
+
+  it("preserves existing label fields while concurrent initialization fills missing starters", async () => {
+    await seedBuiltinLabels()
+    await updateLabel("lbl-builtin-vip", { name: "Priority", color: "#123456", sortOrder: 8 })
+    const existing = await getDb().labels.get("lbl-builtin-vip")
+    await getDb().labels.delete("lbl-builtin-bug")
+
+    await Promise.all(Array.from({ length: 4 }, () => seedBuiltinLabels()))
+
+    expect(await getDb().labels.get("lbl-builtin-vip")).toEqual(existing)
+    expect(await listLabels()).toHaveLength(4)
+    expect(await getDb().labels.get("lbl-builtin-bug")).toMatchObject({
+      name: "Bug",
+      builtin: true,
+    })
+  })
+
   it("deleteLabel is a no-op for an unknown id", async () => {
     await expect(deleteLabel("nope")).resolves.toBeUndefined()
   })

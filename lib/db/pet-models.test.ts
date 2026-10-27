@@ -13,11 +13,14 @@ import {
 import type { PetModelRow } from "./pet-models"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
+import { loadLive2dSkinAsset } from "@/lib/pet/skin-assets"
+import { resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
 
 const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
+  resetPetSkinRuntimeForTests()
   await dbFixture.restore()
   await Promise.all([getDb().petModels.clear(), getDb().petModelFiles.clear()])
 })
@@ -189,6 +192,19 @@ describe("pet-models CRUD", () => {
       updatePetModelCustomization("nope", { transform: { scale: 1, offsetX: 0, offsetY: 0 } })
     ).resolves.toBeUndefined()
     expect(await getPetModel("nope")).toBeUndefined()
+  })
+
+  it("reads saved customization after the same model's files have been cached", async () => {
+    const row = await addPetModel(meta({ transform: { scale: 1, offsetX: 0, offsetY: 0 } }), [])
+    expect((await loadLive2dSkinAsset(row.id))?.row.transform?.scale).toBe(1)
+    const patch = {
+      transform: { scale: 2, offsetX: 0.2, offsetY: -0.1 },
+      motionOverrides: { idle: { motionGroup: "TapBody" } },
+      parameterMapping: { mouthOpen: null },
+    }
+    await updatePetModelCustomization(row.id, patch)
+    expect(await getPetModel(row.id)).toMatchObject(patch)
+    expect((await loadLive2dSkinAsset(row.id))?.row).toMatchObject(patch)
   })
 
   it("lazily persists an invalid compatibility summary for a legacy row once", async () => {

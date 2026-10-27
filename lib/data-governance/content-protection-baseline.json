@@ -233,6 +233,7 @@
   "petConversationV2": "encrypted-content",
   "petInventory": "metadata-only",
   "petModelFiles": "metadata-only",
+  "petMediaPacks": "metadata-only",
   "petModels": "metadata-only",
   "petProfile": "metadata-only",
   "petSpritePacks": "metadata-only",

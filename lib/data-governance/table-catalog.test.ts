@@ -56,7 +56,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(392)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(393)
     db.close()
   })
 
@@ -118,7 +118,13 @@ describe("DataTableCatalog", () => {
     ]) {
       expect(policyForTable(table)?.syncPolicy.mode).toBe("companion-readonly")
     }
-    for (const table of ["petConversationV2", "petModels", "petModelFiles", "petSpritePacks"]) {
+    for (const table of [
+      "petConversationV2",
+      "petModels",
+      "petModelFiles",
+      "petSpritePacks",
+      "petMediaPacks",
+    ]) {
       expect(COMPANION_SYNC_TABLES.has(table as never)).toBe(false)
     }
     // Conversation folders, so a paired device files its list into the Host's

@@ -581,6 +581,18 @@ export interface ConnectorInboundJobRow {
   dispatchMode: ActiveRunDispatchMode
   status: ConnectorInboundJobStatus
   attempts: number
+  /** Terminal recall fence, including recalls received before transcript insertion. */
+  recalledAt?: number
+  /** Latest edit while the create is waiting to enter the transcript. */
+  pendingEdit?: NormalizedInboundEvent
+  /** Matrix candidates remain separate until the original author's identity is known. */
+  pendingEditsBySender?: Record<string, NormalizedInboundEvent>
+  /** Retained Matrix replacement candidates, including superseded revisions. */
+  matrixEditRevisions?: Record<string, NormalizedInboundEvent>
+  matrixRedactedEditIds?: string[]
+  /** Durable mutation intent must not expire before its canonical write commits. */
+  mutationRevision?: number
+  appliedMutationRevision?: number
   leaseOwner?: string
   leaseExpiresAt?: number
   executionRunId?: string

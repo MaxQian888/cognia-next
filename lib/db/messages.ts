@@ -1,7 +1,9 @@
 import { measureOperation } from "@/lib/perf/operation-performance"
 import type { UIMessage } from "ai"
+import { mergeChatTurnMetadata } from "@/lib/chat/continuation"
 import Dexie from "dexie"
 import { loggers } from "@cognia/logging"
+import { refusedHostMessageOf } from "@/lib/chat/refused-host-message"
 import {
   applyReactionChange,
   type MessageReaction,
@@ -37,6 +39,7 @@ import {
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 import { stripPromptPreambleFromParts } from "@/lib/chat/prompt-preamble"
 import { emptyWorkingSet } from "@/lib/chat/working-set"
+import { inboundPartsForReplay } from "@/lib/connectors/inbound-stored-parts"
 
 function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -285,11 +288,15 @@ export function toStoredMessageRow(
 ): StoredMessage {
   const meta = (message as { metadata?: Record<string, unknown> }).metadata
   const senderKindRaw = meta?.senderKind
+  const platformMessage = meta?.platformMessage as { messageId?: unknown } | undefined
   return {
     id: fields.id,
     sessionId: fields.sessionId,
     projectId: fields.projectId,
     role: message.role,
+    ...(typeof platformMessage?.messageId === "string"
+      ? { platformMessageId: platformMessage.messageId }
+      : {}),
     parts: fields.parts,
     turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
     senderId: typeof meta?.senderId === "string" ? meta.senderId : undefined,
@@ -301,6 +308,32 @@ export function toStoredMessageRow(
     metadata: stripHoistedMeta(meta),
     createdAt: fields.createdAt,
   }
+}
+
+/** Connector content is owned by transport revisions, never a stale UI snapshot. */
+function preserveInboundRevision(row: StoredMessage, previous: StoredMessage | undefined): void {
+  row.platformMessageId = row.metadata?.platformMessage?.messageId ?? row.platformMessageId
+  if (!previous?.metadata?.platformMessage) return
+  row.parts = inboundPartsForReplay(previous.parts)
+  row.platformMessageId = previous.platformMessageId ?? previous.metadata.platformMessage.messageId
+  const metadata = { ...row.metadata }
+  for (const key of [
+    "platformMessage",
+    "inboundA2UI",
+    "inboundLabels",
+    "replyTo",
+    "editedAt",
+    "editCount",
+    "deletedAt",
+    "inboundEditRevision",
+    "inboundEditBase",
+    "inboundMatrixRevisions",
+    "inboundMutationRevision",
+  ]) {
+    delete metadata[key]
+    if (Object.hasOwn(previous.metadata, key)) metadata[key] = previous.metadata[key]
+  }
+  row.metadata = metadata
 }
 
 /**
@@ -345,7 +378,11 @@ export function rowToUIMessage(r: StoredMessage): UIMessage {
   return {
     id: r.id,
     role: r.role,
-    parts: r.parts,
+    parts:
+      r.metadata &&
+      (Object.hasOwn(r.metadata, "platformMessage") || Object.hasOwn(r.metadata, "inboundA2UI"))
+        ? inboundPartsForReplay(r.parts)
+        : r.parts,
     ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
   } as UIMessage
 }
@@ -394,7 +431,9 @@ async function listRecentMessagesNow(sessionId: string, limit: number): Promise<
  * Persist the current message list for a session.
  *
  * Streaming sends one event per token-batch, so this gets called many times
- * per turn. We diff by id: upsert what's still here, delete what disappeared.
+ * per turn. We diff by id: upsert what's still here, delete ordinary messages
+ * that disappeared. Connector-owned rows survive omissions from stale windows;
+ * their removal goes through an explicit clear, truncate or delete operation.
  * That keeps the IO proportional to *changed* messages instead of total
  * messages, which matters once a session grows past a few dozen turns.
  */
@@ -434,10 +473,6 @@ async function replaceSessionTranscriptNow(
   // events for newly-arrived user messages once the rows are persisted.
   const newUserMessageIds: string[] = []
 
-  // The last message's resolved timestamp + parts, captured in the write loop
-  // so we can denormalize a preview onto the session row after commit.
-  let lastPreviewSource: { createdAt: number; parts: StoredMessage["parts"] } | null = null
-
   const snapshot = persistSnapshots.get(sessionId)
   // Built inside the transaction, applied to `persistSnapshots` only after the
   // write commits — so a thrown/aborted transaction never leaves the cache
@@ -451,7 +486,6 @@ async function replaceSessionTranscriptNow(
     assertDatabaseScope(db.name)
     const transactionDb = getDb()
     newUserMessageIds.length = 0
-    lastPreviewSource = null
     nextSnapshot = null
     clearSnapshot = false
     publishedRevision = null
@@ -473,31 +507,7 @@ async function replaceSessionTranscriptNow(
           .then((existingKeys) => {
             const existingIds = new Set(existingKeys as string[])
 
-            if (messages.length === 0) {
-              clearSnapshot = true
-              return transactionDb.messageMediaRefs
-                .where("sessionId")
-                .equals(sessionId)
-                .filter(isMessageOwnedMediaRef)
-                .toArray()
-                .then((refs) => {
-                  for (const ref of refs) orphanCandidates.add(ref.hash)
-                  return Promise.all([
-                    existingIds.size > 0
-                      ? transactionDb.messages.bulkDelete([...existingIds])
-                      : Promise.resolve(),
-                    transactionDb.messageMediaRefs
-                      .where("sessionId")
-                      .equals(sessionId)
-                      .filter(isMessageOwnedMediaRef)
-                      .delete(),
-                  ]).then(async () => {
-                    if (existingIds.size > 0) {
-                      publishedRevision = await bumpTranscriptRevision(transactionDb, sessionId)
-                    }
-                  })
-                })
-            }
+            if (messages.length === 0) clearSnapshot = true
 
             // createdAt source: prefer the in-memory snapshot; only fetch rows from
             // Dexie for ids that exist on disk but aren't cached (cold start). In
@@ -509,7 +519,9 @@ async function replaceSessionTranscriptNow(
             }
             const missingIds = [...existingIds].filter((id) => !createdAtById.has(id))
 
-            const persistRows = (fetched: Array<StoredMessage | undefined>): Promise<void> => {
+            const persistRows = async (
+              fetched: Array<StoredMessage | undefined>
+            ): Promise<void> => {
               for (const row of fetched) {
                 if (row) createdAtById.set(row.id, row.createdAt)
               }
@@ -527,11 +539,14 @@ async function replaceSessionTranscriptNow(
                 const id = message.id ?? newId()
                 incomingIds.add(id)
 
-                const createdAt = createdAtById.get(id) ?? now + i
+                const stampedAt = (message.metadata as { createdAt?: unknown } | undefined)
+                  ?.createdAt
+                const createdAt =
+                  createdAtById.get(id) ??
+                  (typeof stampedAt === "number" && Number.isFinite(stampedAt)
+                    ? stampedAt
+                    : now + i)
                 nextSnapshot.set(id, { ref: new WeakRef(message), createdAt })
-                if (i === messages.length - 1) {
-                  lastPreviewSource = { createdAt, parts: message.parts }
-                }
 
                 const prevEntry = snapshot?.get(id)
                 if (prevEntry?.ref.deref() === message && existingIds.has(id)) {
@@ -564,11 +579,16 @@ async function replaceSessionTranscriptNow(
                 }
               }
 
-              const toDelete = [...existingIds].filter((id) => !incomingIds.has(id))
-              const changedIds = [...toDelete, ...rows.map((row) => row.id)]
-              const replacementRefs = rows.flatMap((row) =>
-                messageMediaRefRows(row.id, row.sessionId, row.parts)
+              const omittedIds = [...existingIds].filter((id) => !incomingIds.has(id))
+              const omittedRows =
+                omittedIds.length > 0 ? await transactionDb.messages.bulkGet(omittedIds) : []
+              // A window may never have observed these rows, or their later
+              // edit/recall. Keep their transport-owned identity and tombstone
+              // so a subsequent stale upsert still has authority to preserve.
+              const toDelete = omittedRows.flatMap((row) =>
+                row && !row.metadata?.platformMessage && !refusedHostMessageOf(row) ? [row.id] : []
               )
+              const changedIds = [...toDelete, ...rows.map((row) => row.id)]
               const oldRefs =
                 changedIds.length > 0
                   ? transactionDb.messageMediaRefs
@@ -589,12 +609,38 @@ async function replaceSessionTranscriptNow(
                   previousRows.flatMap((row) => (row ? [[row.id, row] as const] : []))
                 )
                 for (const row of rows) {
+                  row.metadata = mergeChatTurnMetadata(
+                    row.metadata,
+                    previousById.get(row.id)?.metadata
+                  )
+                  preserveInboundRevision(row, previousById.get(row.id))
                   row.workingSetSnapshot = existingIds.has(row.id)
                     ? previousById.get(row.id)?.workingSetSnapshot
                     : (currentSession?.workingSet ?? emptyWorkingSet())
                 }
                 if (toDelete.length > 0) await transactionDb.messages.bulkDelete(toDelete)
                 if (rows.length > 0) await transactionDb.messages.bulkPut(rows)
+                // Stamp while holding the message write transaction: a delayed
+                // post-commit preview must not undo a concurrent recall.
+                // A stale stream can omit a newer connector-owned row that
+                // survived above. The sidebar follows canonical history, not
+                // the tail of the caller's older in-memory snapshot.
+                const lastRow = await transactionDb.messages
+                  .where("[sessionId+createdAt]")
+                  .between([sessionId, 0], [sessionId, Number.MAX_SAFE_INTEGER])
+                  .reverse()
+                  .first()
+                if (
+                  lastRow &&
+                  currentSession &&
+                  (currentSession.lastMessageAt !== lastRow.createdAt ||
+                    currentSession.lastMessagePreview === undefined)
+                ) {
+                  await transactionDb.sessions.update(sessionId, {
+                    lastMessagePreview: previewOf(lastRow.parts),
+                    lastMessageAt: lastRow.createdAt,
+                  })
+                }
                 if (changedIds.length > 0) {
                   await transactionDb.messageMediaRefs
                     .where("messageId")
@@ -602,6 +648,9 @@ async function replaceSessionTranscriptNow(
                     .filter(isMessageOwnedMediaRef)
                     .delete()
                 }
+                const replacementRefs = rows.flatMap((row) =>
+                  messageMediaRefRows(row.id, row.sessionId, row.parts)
+                )
                 if (replacementRefs.length > 0) {
                   await transactionDb.messageMediaRefs.bulkPut(replacementRefs)
                 }
@@ -649,32 +698,6 @@ async function replaceSessionTranscriptNow(
     persistSnapshots.set(sessionId, nextSnapshot)
   }
 
-  // Denormalize a preview of the last message onto the session row so the
-  // sidebar can render a preview line without a per-row message query. Written
-  // only on a message *boundary* (a different `lastMessageAt`) — never on
-  // in-place streaming text growth, which would rewrite the row on every token
-  // batch and churn the sidebar's `useLiveQuery`. A long streamed reply's
-  // preview may therefore show an early chunk; it refreshes on the next message.
-  // Re-widen: `lastPreviewSource` is only ever assigned inside the transaction
-  // closure, so the compiler's outer-flow type stays at its `null` initializer.
-  const previewSource = lastPreviewSource as {
-    createdAt: number
-    parts: StoredMessage["parts"]
-  } | null
-  if (previewSource && session) {
-    const boundaryChanged =
-      session.lastMessageAt !== previewSource.createdAt || session.lastMessagePreview === undefined
-    if (boundaryChanged) {
-      await withDbReopenRetry(() => {
-        assertDatabaseScope(db.name)
-        return getDb().sessions.update(sessionId, {
-          lastMessagePreview: previewOf(previewSource.parts),
-          lastMessageAt: previewSource.createdAt,
-        })
-      })
-    }
-  }
-
   if (newUserMessageIds.length > 0) {
     // Fire-and-forget so persistence is never blocked by the workflow
     // subsystem. Each user-message arrival is its own trigger event so a
@@ -696,7 +719,7 @@ async function replaceSessionTranscriptNow(
 /**
  * Backward-compatible name for callers that still own a complete transcript
  * snapshot. Partial windows must use {@link commitMessageDelta}; omissions in
- * this API are intentionally interpreted as deletions.
+ * this API delete ordinary messages, while connector rows require explicit deletion.
  */
 export const persistMessages = replaceSessionTranscript
 
@@ -764,7 +787,7 @@ async function commitMessageDeltaNow(
         senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
           ? senderKindRaw
           : undefined
-      return {
+      const row: StoredMessage = {
         id,
         sessionId,
         projectId,
@@ -774,12 +797,18 @@ async function commitMessageDeltaNow(
         senderId: typeof meta?.senderId === "string" ? meta.senderId : undefined,
         senderKind,
         collaboration: collaborationColumnOf(meta),
-        metadata: stripHoistedMeta(meta),
+        metadata: mergeChatTurnMetadata(stripHoistedMeta(meta), existingById.get(id)?.metadata),
         workingSetSnapshot: existingById.has(id)
           ? existingById.get(id)?.workingSetSnapshot
           : (currentSession?.workingSet ?? emptyWorkingSet()),
-        createdAt: existingById.get(id)?.createdAt ?? now + index,
+        createdAt:
+          existingById.get(id)?.createdAt ??
+          (typeof meta?.createdAt === "number" && Number.isFinite(meta.createdAt)
+            ? meta.createdAt
+            : now + index),
       }
+      preserveInboundRevision(row, existingById.get(id))
+      return row
     })
 
     const requestedDeleteIds = [...new Set(deleteIds)].filter((id) => !upsertIds.includes(id))
@@ -920,7 +949,6 @@ async function persistStreamingMessagesNow(
       : undefined
   const normalizedLast = await prepareMessage(db.name, sessionId, last)
   assertDatabaseScope(db.name)
-  const replacementRefs = messageMediaRefRows(last.id, sessionId, normalizedLast.parts)
   let orphanHashes: string[] = []
   const updated = await db.transaction(
     "rw",
@@ -939,15 +967,18 @@ async function persistStreamingMessagesNow(
       if (existing.sessionId !== sessionId) {
         throw new Error("Streaming persistence cannot move a message between sessions")
       }
-      await db.messages.put({
+      const row: StoredMessage = {
         ...existing,
         role: last.role,
         parts: normalizedLast.parts,
         turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
         senderId,
         senderKind,
-        metadata: stripHoistedMeta(meta),
-      })
+        metadata: mergeChatTurnMetadata(stripHoistedMeta(meta), existing.metadata),
+      }
+      preserveInboundRevision(row, existing)
+      await db.messages.put(row)
+      const replacementRefs = messageMediaRefRows(last.id, sessionId, row.parts)
       const oldRefs = await db.messageMediaRefs
         .where("messageId")
         .equals(last.id)
@@ -1172,12 +1203,12 @@ async function updateMessageMetadataNow(
   patch: Record<string, unknown>
 ): Promise<void> {
   const db = getDb()
-  const row = await db.messages.get(messageId)
-  if (!row || row.sessionId !== sessionId) return
-  assertSessionWritable(await db.sessions.get(sessionId), "metadata")
-  const merged = stripHoistedMeta({ ...(row.metadata ?? {}), ...patch })
   let revision: number | null = null
   await db.transaction("rw", db.messages, db.sessions, async () => {
+    assertSessionWritable(await db.sessions.get(sessionId), "metadata")
+    const row = await db.messages.get(messageId)
+    if (!row || row.sessionId !== sessionId) return
+    const merged = stripHoistedMeta({ ...(row.metadata ?? {}), ...patch })
     await db.messages.update(messageId, { metadata: merged })
     revision = await bumpTranscriptRevision(db, sessionId)
   })

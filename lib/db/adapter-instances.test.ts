@@ -11,6 +11,7 @@ import {
   updateAdapterInstance,
   updateAdapterConfigSection,
   patchAdapterInstanceSettings,
+  commitWechatPersonalCheckpoint,
   deleteAdapterInstance,
   setAdapterInstanceOwner,
   setAdapterOutboundRecipients,
@@ -140,6 +141,58 @@ describe("adapter-instances", () => {
     const row = await createAdapterInstance(baseInput())
     await deleteAdapterInstance(row.id)
     expect(await getAdapterInstance(row.id)).toBeUndefined()
+  })
+
+  describe("personal-WeChat checkpoint admission", () => {
+    const next = { baseUrl: "https://ilink.example", credentialHash: "hash", cursor: "next" }
+    const input = () => ({ ...baseInput(), type: "wechat-personal" as const })
+
+    it("only one overlapping runtime may advance an expected checkpoint", async () => {
+      const row = await createAdapterInstance(input())
+      const outcomes = await Promise.all([
+        commitWechatPersonalCheckpoint(row.id, row, next, () => true),
+        commitWechatPersonalCheckpoint(row.id, row, { ...next, cursor: "stale" }, () => true),
+      ])
+      expect(outcomes.filter(Boolean)).toHaveLength(1)
+      expect((await getAdapterInstance(row.id))?.settings?.ilinkCheckpoint).toEqual(next)
+    })
+
+    it("merges progress without overwriting concurrent unrelated settings", async () => {
+      const row = await createAdapterInstance(input())
+      await patchAdapterInstanceSettings(row.id, { unrelated: "new" })
+      expect(await commitWechatPersonalCheckpoint(row.id, row, next, () => true)).toBe(true)
+      expect((await getAdapterInstance(row.id))?.settings).toMatchObject({
+        unrelated: "new",
+        ilinkCheckpoint: next,
+      })
+    })
+
+    it.each([
+      { enabled: false },
+      { settings: { baseUrl: "https://replacement.example" } },
+      { settings: { accountId: "replacement-account" } },
+      { credentialsRef: { keyringService: "replacement", accounts: ["botToken"] } },
+    ])("refuses progress after authority changed: %p", async (patch) => {
+      const row = await createAdapterInstance(input())
+      await updateAdapterInstance(row.id, patch)
+      expect(await commitWechatPersonalCheckpoint(row.id, row, next, () => true)).toBe(false)
+      expect((await getAdapterInstance(row.id))?.settings?.ilinkCheckpoint).toBeUndefined()
+    })
+
+    it("refuses stopped generations and deleted rows without recreating them", async () => {
+      const row = await createAdapterInstance(input())
+      expect(await commitWechatPersonalCheckpoint(row.id, row, next, () => false)).toBe(false)
+      await deleteAdapterInstance(row.id)
+      expect(await commitWechatPersonalCheckpoint(row.id, row, next, () => true)).toBe(false)
+      expect(await getAdapterInstance(row.id)).toBeUndefined()
+    })
+
+    it("rolls back when the generation stops while the write is in flight", async () => {
+      const row = await createAdapterInstance(input())
+      const isCurrent = jest.fn().mockReturnValueOnce(true).mockReturnValue(false)
+      expect(await commitWechatPersonalCheckpoint(row.id, row, next, isCurrent)).toBe(false)
+      expect((await getAdapterInstance(row.id))?.settings?.ilinkCheckpoint).toBeUndefined()
+    })
   })
 
   it("deleteAdapterInstance tombstones the adapter id for paired clients", async () => {

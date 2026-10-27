@@ -52,6 +52,23 @@ it("does not interrupt a live turn for append or display metadata updates", asyn
   expect(invalidateTranscriptRuntime).not.toHaveBeenCalled()
 })
 
+it("does not forward plugin key paths into message metadata or parts", async () => {
+  const metadata = { automatedTurn: { producer: "plugin" } }
+  await getDb().messages.update("m1", { metadata })
+
+  await messageRepository.update("m1", {
+    content: "edited",
+    "metadata.automatedTurn": undefined,
+    "metadata.permissions.0": "allow",
+    "parts.0.text": "injected",
+  } as Parameters<typeof messageRepository.update>[1])
+
+  const stored = await getDb().messages.get("m1")
+  expect(stored?.metadata).toEqual(metadata)
+  expect(stored?.parts).toEqual([{ type: "text", text: "edited" }])
+  expect(Object.keys(stored ?? {}).some((key) => key.includes("."))).toBe(false)
+})
+
 it("keeps reconstruction behind the entire remote deletion, including its database commit", async () => {
   let releaseClose!: () => void
   let enteredClose!: () => void

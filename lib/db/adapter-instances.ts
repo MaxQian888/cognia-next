@@ -284,6 +284,47 @@ export async function patchAdapterInstanceSettings(
   })
 }
 
+/** Only the owning runtime may CAS its progress against the row it polled. */
+export async function commitWechatPersonalCheckpoint(
+  id: string,
+  expected: AdapterInstanceRow,
+  next: Record<string, unknown>,
+  isCurrent: () => boolean
+): Promise<boolean> {
+  // A paired shell's mirror is not authoritative and must never replace a
+  // host's whole settings object to report local runtime progress.
+  if (hostWriter()) return false
+  const db = getDb()
+  const superseded = new Error("checkpoint_superseded")
+  return db
+    .transaction("rw", db.adapterInstances, async () => {
+      const current = await db.adapterInstances.get(id)
+      if (!current || current.type !== "wechat-personal" || !current.enabled) return false
+      const scope = (row: AdapterInstanceRow) => [
+        row.createdAt,
+        row.type,
+        row.enabled,
+        row.owner,
+        row.credentialsRef,
+        row.settings?.baseUrl,
+        row.settings?.accountId,
+        row.settings?.ilinkCheckpoint,
+      ]
+      if (JSON.stringify(scope(current)) !== JSON.stringify(scope(expected))) return false
+      if (isOwnedElsewhere(current.owner) || !isCurrent()) return false
+      await db.adapterInstances.update(id, {
+        settings: { ...(current.settings ?? {}), ilinkCheckpoint: next },
+        updatedAt: Date.now(),
+      })
+      if (!isCurrent()) throw superseded
+      return true
+    })
+    .catch((error: unknown) => {
+      if (error === superseded) return false
+      throw error
+    })
+}
+
 export async function deleteAdapterInstance(id: string): Promise<void> {
   const db = getDb()
   const host = hostWriter()

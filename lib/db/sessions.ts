@@ -473,6 +473,25 @@ export async function updateSession(
   })
 }
 
+/** Merge one Agent's choice against the current row, preserving concurrent choices. */
+export async function updateSessionAgentModel(
+  id: string,
+  agentId: string,
+  choice: NonNullable<ChatSession["externalAgentModels"]>[string]
+): Promise<void> {
+  await withDbReopenRetry(async () => {
+    const db = getDb()
+    await db.transaction("rw", db.sessions, async () => {
+      const session = await db.sessions.get(id)
+      assertSessionWritable(session, "metadata")
+      await db.sessions.update(id, {
+        externalAgentModels: { ...session?.externalAgentModels, [agentId]: choice },
+        updatedAt: Date.now(),
+      })
+    })
+  })
+}
+
 /** Atomic append: simultaneous admissions cannot lose another Host's cleanup barrier. */
 export async function recordSessionDeliverySourceHost(
   id: string,

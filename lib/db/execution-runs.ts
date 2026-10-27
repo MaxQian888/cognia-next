@@ -218,6 +218,27 @@ export function appendRunEventInsideTransaction(
   return appendInsideTransaction(db, runId, input)
 }
 
+/** Batch variant for an existing transaction, retaining one replay cache per batch. */
+export function appendRunEventsInsideTransaction(
+  db: ReturnType<typeof getDb>,
+  runId: string,
+  inputs: readonly AppendRunEventInput[]
+): Promise<RunEvent[]> {
+  // A cache belongs to one transaction attempt, never to an aborted retry.
+  const batchHistory: { events?: RunEvent[] } = {}
+  const initial = db.executionRuns.get(runId).then(() => [] as RunEvent[])
+  return inputs.reduce<Promise<RunEvent[]>>(
+    (pending, input) =>
+      pending.then((out) =>
+        appendInsideTransaction(db, runId, input, batchHistory).then((event) => {
+          out.push(event)
+          return out
+        })
+      ),
+    initial
+  )
+}
+
 function appendInsideTransaction(
   db: ReturnType<typeof getDb>,
   runId: string,
@@ -332,22 +353,7 @@ export const runEventJournal: RunEventJournal = {
         db.executionRuns,
         db.executionRunEvents,
         db.notificationProjectionWork,
-        () => {
-          // One cache per transaction attempt: aborts/reopens cannot retain
-          // events whose write or notification projection touch rolled back.
-          const batchHistory: { events?: RunEvent[] } = {}
-          const initial = db.executionRuns.get(runId).then(() => [] as RunEvent[])
-          return idempotentInputs.reduce<Promise<RunEvent[]>>(
-            (pending, input) =>
-              pending.then((out) =>
-                appendInsideTransaction(db, runId, input, batchHistory).then((event) => {
-                  out.push(event)
-                  return out
-                })
-              ),
-            initial
-          )
-        }
+        () => appendRunEventsInsideTransaction(db, runId, idempotentInputs)
       )
     })
   },

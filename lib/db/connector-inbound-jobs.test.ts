@@ -10,6 +10,9 @@ import {
   dismissConnectorInboundJobRecovery,
   enqueueConnectorInboundJob,
   ensureConnectorInboundJob,
+  recordConnectorInboundRecall,
+  recordConnectorInboundEdit,
+  findConnectorInboundMutation,
   listRecoverableConnectorInboundJobs,
   listPendingConnectorInboundJobs,
   markConnectorInboundJobHistoryOnly,
@@ -19,10 +22,13 @@ import {
   retryConnectorInboundJobFromStart,
   sweepTerminalConnectorInboundJobs,
   updateConnectorInboundJobPayload,
+  acknowledgeConnectorInboundMutation,
+  listConnectorInboundMutationJobs,
   INBOUND_HISTORY_RETENTION_MS,
   INBOUND_RECOVERY_RETENTION_MS,
 } from "./connector-inbound-jobs"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import type { ConnectorInboundJobRow } from "./connector-types"
 
 function event(messageId: string, timestamp: number): NormalizedInboundEvent {
   return {
@@ -47,6 +53,318 @@ const dbFixture = createDbTestFixture()
 beforeAll(dbFixture.initialize)
 beforeEach(dbFixture.restore)
 afterAll(dbFixture.dispose)
+
+it("does not acknowledge a newer mutation using an older window's token", async () => {
+  const create = event("ack-source", 1)
+  const job = await enqueueConnectorInboundJob(create, "queue")
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    messageId: "edit-1",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+  })
+  const first = (await getDb().connectorInboundJobs.get(job.id))!
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    messageId: "edit-2",
+    replacesMessageId: create.messageId,
+    timestamp: 3,
+  })
+  await acknowledgeConnectorInboundMutation(job.id, first.mutationRevision)
+  const latest = (await getDb().connectorInboundJobs.get(job.id))!
+  expect(latest.appliedMutationRevision).toBeUndefined()
+  expect(await listConnectorInboundMutationJobs()).toEqual([latest])
+  await acknowledgeConnectorInboundMutation(job.id, latest.mutationRevision)
+  expect(await listConnectorInboundMutationJobs()).toEqual([])
+})
+
+it("retains an unapplied mutation with canonical history until its exact ACK", async () => {
+  const create = event("pinned-source", 1)
+  const job = await enqueueConnectorInboundJob(create, "queue")
+  await completeConnectorInboundJob(job.id)
+  await getDb().messages.put({
+    id: "pinned-row",
+    sessionId: "pinned-session",
+    role: "user",
+    createdAt: 1,
+    parts: [{ type: "text", text: "original" }],
+    platformMessageId: create.messageId,
+    metadata: {
+      platformMessage: {
+        messageId: create.messageId,
+        platform: create.platform,
+        adapterId: create.adapterId,
+        conversationKey: create.conversationKey,
+        sender: create.sender,
+      },
+    },
+  })
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    messageId: "pinned-edit",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+  })
+  const current = (await getDb().connectorInboundJobs.get(job.id))!
+  const now = current.updatedAt + INBOUND_HISTORY_RETENTION_MS + 1
+  expect(await sweepTerminalConnectorInboundJobs({ now })).toBe(0)
+  await acknowledgeConnectorInboundMutation(job.id, current.mutationRevision)
+  expect(await sweepTerminalConnectorInboundJobs({ now })).toBe(1)
+})
+
+it.each(["edit", "delete"] as const)(
+  "rolls back a new %s placeholder if its mutation write fails",
+  async (kind) => {
+    const mutation = { ...event(`atomic-${kind}`, 2), kind, replacesMessageId: "original" }
+    const db = getDb()
+    const write = jest
+      .spyOn(db.connectorInboundJobs, "update")
+      .mockRejectedValueOnce(new Error("injected mutation write failure"))
+    try {
+      await expect(
+        kind === "edit"
+          ? recordConnectorInboundEdit(mutation)
+          : recordConnectorInboundRecall(mutation, 2)
+      ).rejects.toThrow("injected mutation write failure")
+    } finally {
+      write.mockRestore()
+    }
+    db.close()
+    await db.open()
+    expect(await db.connectorInboundJobs.count()).toBe(0)
+  }
+)
+
+it("removes a Matrix replacement redacted before its original or before the replacement", async () => {
+  const create = {
+    ...event("!r:s|$original", 1),
+    platform: "matrix" as const,
+    conversationKey: "matrix:lk-1:!r:s",
+  }
+  const edit = {
+    ...create,
+    kind: "edit" as const,
+    messageId: "!r:s|$edit",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+    raw: { event_id: "$edit" },
+    plainText: "withdrawn",
+  }
+  const recall = {
+    ...create,
+    kind: "delete" as const,
+    messageId: "!r:s|$redaction",
+    replacesMessageId: edit.messageId,
+    timestamp: 3,
+  }
+  await recordConnectorInboundRecall(recall, 3)
+  await recordConnectorInboundEdit(edit)
+  await ensureConnectorInboundJob(create, "queue")
+  expect((await findConnectorInboundMutation(create))?.pendingEdit).toBeUndefined()
+  expect((await findConnectorInboundMutation(create))?.recalledAt).toBeUndefined()
+})
+
+it("retains a threaded recall fence as long as its queued source survives", async () => {
+  const create = {
+    ...event("recall-retained-source", 100),
+    platform: "matrix" as const,
+    conversationKey: "matrix:lk-1:!room:srv:$thread",
+  }
+  const { job } = await ensureConnectorInboundJob(create, "queue", { now: 100 })
+  await recordConnectorInboundRecall(
+    {
+      ...create,
+      kind: "delete",
+      replacesMessageId: create.messageId,
+      conversationKey: "matrix:lk-1:!room:srv",
+    },
+    200
+  )
+  await sweepTerminalConnectorInboundJobs({ now: 200 + INBOUND_HISTORY_RETENTION_MS + 1 })
+  expect((await getDb().connectorInboundJobs.get(job.id))?.status).toBe("queued")
+  expect((await findConnectorInboundMutation(create))?.recalledAt).toBe(200)
+})
+
+it("rechecks a terminal retention snapshot before deleting a promoted late create", async () => {
+  const create = event("sweep-promoted", 1)
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+  })
+  const db = getDb()
+  const placeholder = (await db.connectorInboundJobs.toArray())[0]
+  await db.connectorInboundJobs.update(placeholder.id, { updatedAt: 0 })
+  const collection = db.connectorInboundJobs.toCollection()
+  const prototype = Object.getPrototypeOf(collection) as { toArray: typeof collection.toArray }
+  const original = prototype.toArray
+  const read = jest.spyOn(prototype, "toArray").mockImplementation(async function (
+    this: typeof collection
+  ) {
+    const rows = (await Reflect.apply(original, this, [])) as ConnectorInboundJobRow[]
+    if (rows.some((row) => row.id === placeholder.id)) {
+      read.mockRestore()
+      await ensureConnectorInboundJob(create, "queue")
+    }
+    return rows
+  } as never)
+  try {
+    await expect(
+      sweepTerminalConnectorInboundJobs({ now: INBOUND_HISTORY_RETENTION_MS + 1 })
+    ).resolves.toBe(0)
+    expect((await db.connectorInboundJobs.get(placeholder.id))?.status).toBe("queued")
+  } finally {
+    read.mockRestore()
+  }
+})
+
+it("keeps equal-clock Matrix edit ordering after recovery payload compaction", async () => {
+  const create = { ...event("!room:srv|$original", 1), platform: "matrix" as const }
+  const accepted = await ensureConnectorInboundJob(create, "queue")
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    messageId: "!room:srv|$z",
+    replacesMessageId: create.messageId,
+    timestamp: 20,
+    raw: { event_id: "$z" },
+    plainText: "newest",
+  })
+  await markConnectorInboundJobRecoveryRequired(accepted.job.id, "recovery")
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    messageId: "!room:srv|$a",
+    replacesMessageId: create.messageId,
+    timestamp: 20,
+    raw: { event_id: "$a" },
+    plainText: "stale",
+  })
+  expect((await findConnectorInboundMutation(create))?.pendingEdit?.plainText).toBe("newest")
+})
+
+it("keeps early Matrix edit candidates separate until the original author is known", async () => {
+  const create = {
+    ...event("!room:srv|$original", 1),
+    platform: "matrix" as const,
+    conversationKey: "matrix:lk-1:!room:srv",
+    sender: { ...event("", 1).sender, remoteUserId: "@alice:srv" },
+  }
+  const forged = {
+    ...create,
+    kind: "edit" as const,
+    messageId: "!room:srv|$z",
+    replacesMessageId: create.messageId,
+    timestamp: 3,
+    sender: { ...create.sender, remoteUserId: "@mallory:srv" },
+    plainText: "forged",
+  }
+  const valid = {
+    ...create,
+    kind: "edit" as const,
+    messageId: "!room:srv|$a",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+    plainText: "valid",
+  }
+  await recordConnectorInboundEdit(forged)
+  await recordConnectorInboundEdit(valid)
+  expect((await findConnectorInboundMutation(create))?.pendingEdit?.plainText).toBe("valid")
+  const accepted = await ensureConnectorInboundJob(create, "queue")
+  expect(accepted.job.pendingEdit?.plainText).toBe("valid")
+  await recordConnectorInboundEdit({ ...forged, timestamp: 4 })
+  expect((await findConnectorInboundMutation(create))?.pendingEdit?.plainText).toBe("valid")
+})
+
+it("promotes an edit that arrived before the create exactly once", async () => {
+  const create = event("edit-before-enqueue", 1)
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+    plainText: "edited",
+  })
+  const accepted = await ensureConnectorInboundJob(create, "queue")
+  expect(accepted.inserted).toBe(true)
+  expect(accepted.job.status).toBe("queued")
+  expect(accepted.job.pendingEdit?.plainText).toBe("edited")
+  expect((await ensureConnectorInboundJob(create, "queue")).inserted).toBe(false)
+})
+
+it("never promotes an early edit placeholder once the message has been recalled", async () => {
+  const create = event("edit-then-recall", 1)
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+  })
+  await recordConnectorInboundRecall(
+    { ...create, kind: "delete", replacesMessageId: create.messageId },
+    3
+  )
+  expect((await ensureConnectorInboundJob(create, "queue")).inserted).toBe(false)
+  expect((await findConnectorInboundMutation(create))?.recalledAt).toBe(3)
+})
+
+it("keeps only the newest queued edit and never replaces a recall with an edit", async () => {
+  const create = event("pending-edit", 1)
+  await ensureConnectorInboundJob(create, "queue")
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    replacesMessageId: create.messageId,
+    timestamp: 3,
+    plainText: "new",
+  })
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    replacesMessageId: create.messageId,
+    timestamp: 2,
+    plainText: "old",
+  })
+  expect((await findConnectorInboundMutation(create))?.pendingEdit?.plainText).toBe("new")
+  await recordConnectorInboundRecall(
+    { ...create, kind: "delete", replacesMessageId: create.messageId },
+    4
+  )
+  await recordConnectorInboundEdit({
+    ...create,
+    kind: "edit",
+    replacesMessageId: create.messageId,
+    timestamp: 5,
+    plainText: "resurrect",
+  })
+  expect((await findConnectorInboundMutation(create))?.recalledAt).toBe(4)
+})
+
+it("fences a queued or delayed create after a threadless recall without crossing chat scope", async () => {
+  const create = event("om-recalled", 1)
+  await ensureConnectorInboundJob(create, "queue")
+  await recordConnectorInboundRecall(
+    {
+      ...create,
+      kind: "delete",
+      replacesMessageId: create.messageId,
+      conversationKey: "lark:lk-1:oc-1",
+    },
+    2
+  )
+  expect((await findConnectorInboundMutation(create))?.recalledAt).toBe(2)
+  expect(
+    (await findConnectorInboundMutation({ ...create, conversationKey: "lark:lk-1:oc-10" }))
+      ?.recalledAt
+  ).toBeUndefined()
+  expect(
+    (await findConnectorInboundMutation({ ...create, adapterId: "other" }))?.recalledAt
+  ).toBeUndefined()
+})
 
 describe("connector inbound jobs", () => {
   it("deduplicates, claims in FIFO order, and completes durably", async () => {

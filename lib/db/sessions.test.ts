@@ -17,6 +17,7 @@ import {
   getSession,
   getSessionsByIds,
   updateSession,
+  updateSessionAgentModel,
   setSessionActiveBranchSelection,
   listSessions,
   countSessions,
@@ -1127,6 +1128,25 @@ describe("createSession — default preset auto-apply", () => {
 })
 
 describe("updateSession + listSessions", () => {
+  it("merges concurrent model choices without losing another Agent's entry", async () => {
+    const session = await createSession({ title: "Agent choices" })
+    await updateSession(session.id, {
+      externalAgentModels: { retained: { kind: "native", modelId: "kept" } },
+    })
+    await Promise.all([
+      updateSessionAgentModel(session.id, "alpha", { kind: "native", modelId: "model-a" }),
+      updateSessionAgentModel(session.id, "beta", {
+        kind: "cognia",
+        binding: { providerId: "deepseek", modelId: "deepseek-flash" },
+      }),
+    ])
+    expect((await getSession(session.id))?.externalAgentModels).toEqual({
+      retained: { kind: "native", modelId: "kept" },
+      alpha: { kind: "native", modelId: "model-a" },
+      beta: { kind: "cognia", binding: { providerId: "deepseek", modelId: "deepseek-flash" } },
+    })
+  })
+
   it("persists branch selection and increments the transcript revision", async () => {
     const session = await createSession({ title: "Branches" })
 
@@ -1681,11 +1701,7 @@ describe("deletion tombstones (companion sync v61)", () => {
       costUsd: 0,
       durationMs: 0,
     })
-    await db.sessionUsage.bulkPut([
-      usage("a1", s.id),
-      usage("a2", s.id),
-      usage("b1", other.id),
-    ])
+    await db.sessionUsage.bulkPut([usage("a1", s.id), usage("a2", s.id), usage("b1", other.id)])
     await deleteSession(s.id)
 
     const usageTombs = await db.syncTombstones.where("table").equals("sessionUsage").toArray()

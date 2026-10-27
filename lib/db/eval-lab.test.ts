@@ -15,6 +15,7 @@ import {
   recoverInterruptedEvalWork,
   saveEvalAsset,
   saveEvalProject,
+  recordEvalAttempt,
 } from "./eval-lab"
 import { __resetDbForTesting, getDb } from "./schema"
 
@@ -174,6 +175,148 @@ describe("evaluation lab persistence", () => {
     await expect(getEvalExperiment(manifest.id)).resolves.toMatchObject({
       spentCost: 0.1,
       reservedCost: 0,
+    })
+  })
+
+  it("retains canceled-attempt spend and artifacts idempotently without completing the task", async () => {
+    await createEvalExperiment(manifest)
+    const task: EvalTask = {
+      id: "attempt-task",
+      experimentId: manifest.id,
+      variantId: "variant-1",
+      caseId: "case-1",
+      repetition: 1,
+      state: "cancelled",
+      attempt: 1,
+      reservedCost: 0,
+      updatedAt: 1,
+    }
+    await getDb().evalTasks.add(task)
+    await getDb().evalExperiments.update(manifest.id, { state: "cancelled" })
+    const input = {
+      task,
+      observation: {
+        attempt: 1,
+        startedAt: 1,
+        endedAt: 3,
+        elapsedMs: 2,
+        state: "cancelled" as const,
+        capturedCostUsd: 0.4,
+        costStatus: "estimated" as const,
+      },
+      sample: {
+        id: "attempt-sample",
+        experimentId: manifest.id,
+        taskId: task.id,
+        variantId: task.variantId,
+        caseId: task.caseId,
+        repetition: 1 as const,
+        encryptedArtifact: {
+          version: "cognia-eval-encrypted/v1" as const,
+          algorithm: "AES-GCM" as const,
+          iv: "iv",
+          ciphertext: "ciphertext",
+        },
+        latencyMs: 2,
+        actualCost: 0.4,
+        createdAt: 3,
+        expiresAt: 4,
+      },
+    }
+    await recordEvalAttempt(input)
+    await recordEvalAttempt(input)
+    expect(await getEvalExperiment(manifest.id)).toMatchObject({
+      state: "cancelled",
+      spentCost: 0.4,
+    })
+    expect(await getDb().evalTasks.get(task.id)).toMatchObject({
+      state: "cancelled",
+      attempts: [{ ...input.observation, reservedCostUsd: 0, unsettledCostUsd: 0 }],
+    })
+    expect(await getDb().evalSamples.get("attempt-sample")).toMatchObject({
+      executionStatus: "cancelled",
+      attempt: 1,
+      actualCost: 0.4,
+    })
+  })
+
+  it("keeps unknown spend reserved across a retry and does not double-count the successful settlement", async () => {
+    await createEvalExperiment(manifest)
+    await getDb().evalExperiments.update(manifest.id, { state: "running", reservedCost: 0.3 })
+    const task: EvalTask = {
+      id: "retry-accounting",
+      experimentId: manifest.id,
+      variantId: "variant-1",
+      caseId: "case-1",
+      repetition: 1,
+      state: "running",
+      attempt: 1,
+      reservedCost: 0.3,
+      updatedAt: 1,
+    }
+    await getDb().evalTasks.add(task)
+    await recordEvalAttempt({
+      task,
+      observation: {
+        attempt: 1,
+        startedAt: 1,
+        endedAt: 2,
+        elapsedMs: 1,
+        state: "failed",
+        capturedCostUsd: 0.1,
+        costStatus: "partial",
+      },
+    })
+    expect(await getDb().evalTasks.get(task.id)).toMatchObject({
+      reservedCost: 0,
+      unsettledCostReservation: expect.closeTo(0.2),
+    })
+    expect(await getEvalExperiment(manifest.id)).toMatchObject({
+      spentCost: 0.1,
+      reservedCost: expect.closeTo(0.2),
+    })
+    await getDb().evalTasks.update(task.id, { attempt: 2, reservedCost: 0.3 })
+    await getDb().evalExperiments.update(manifest.id, { reservedCost: 0.5 })
+    const retry: EvalTask = { ...task, attempt: 2 }
+    const retrySample = {
+      id: "retry-sample",
+      experimentId: manifest.id,
+      taskId: task.id,
+      variantId: task.variantId,
+      caseId: task.caseId,
+      repetition: 1 as const,
+      encryptedArtifact: {
+        version: "cognia-eval-encrypted/v1" as const,
+        algorithm: "AES-GCM" as const,
+        iv: "iv",
+        ciphertext: "ciphertext",
+      },
+      latencyMs: 1,
+      actualCost: 0.05,
+      executionStatus: "completed" as const,
+      createdAt: 3,
+      expiresAt: 4,
+    }
+    await recordEvalAttempt({
+      task: retry,
+      observation: {
+        attempt: 2,
+        startedAt: 2,
+        endedAt: 3,
+        elapsedMs: 1,
+        state: "completed",
+        capturedCostUsd: 0.05,
+        costStatus: "estimated",
+      },
+      sample: retrySample,
+    })
+    await completeEvalTask({ task: retry, sample: retrySample, scores: [] })
+    expect((await getEvalExperiment(manifest.id))?.spentCost).toBeCloseTo(0.15)
+    expect((await getEvalExperiment(manifest.id))?.reservedCost).toBeCloseTo(0.2)
+    expect(await getDb().evalTasks.get(task.id)).toMatchObject({
+      state: "completed",
+      reservedCost: 0,
+      unsettledCostReservation: expect.closeTo(0.2),
     })
   })
 

@@ -4,6 +4,8 @@ import type {
   EvalProject,
   EvalRecommendationResult,
   EvalTask,
+  EvalAttemptObservation,
+  EvalSample,
 } from "@cognia/eval-core"
 import type { EvalEncryptedEnvelope } from "@/lib/ai/eval/artifact-crypto"
 import { getDb } from "./schema"
@@ -50,6 +52,9 @@ export interface EvalSampleRow {
   judgeRedactionPolicy?: "redacted"
   judgeRedactionDigest?: string
   actualCost: number
+  executionStatus?: EvalSample["executionStatus"]
+  metricAvailability?: EvalSample["metricAvailability"]
+  attempt?: number
   providerRequestId?: string
   createdAt: number
   expiresAt: number
@@ -114,6 +119,9 @@ export interface EvalRecommendationRow {
     leftVariantId: string
     rightVariantId: string
     metric: "quality"
+    pairedCaseCount?: number
+    leftGradedCaseCount?: number
+    rightGradedCaseCount?: number
     result: import("@cognia/eval-core").BootstrapResult
   }>
   createdAt: number
@@ -260,22 +268,121 @@ export async function completeEvalTask(
         return
       if (experiment && ["cancelled", "completed", "failed"].includes(experiment.state)) return
       if (!experiment) throw new Error(`Evaluation experiment ${input.task.experimentId} not found`)
-      await db.evalSamples.add(input.sample)
+      const existingSample = await db.evalSamples.get(input.sample.id)
+      if (!existingSample) await db.evalSamples.add(input.sample)
       scope?.assertActive()
-      if (input.scores.length) await db.evalScores.bulkAdd(input.scores)
+      if (input.scores.length) await db.evalScores.bulkPut(input.scores)
       scope?.assertActive()
       await db.evalTasks.update(input.task.id, {
-        state: "completed",
+        state:
+          input.sample.executionStatus === "failed" ||
+          input.sample.executionStatus === "timed_out" ||
+          input.sample.executionStatus === "blocked"
+            ? "failed"
+            : input.sample.executionStatus === "cancelled" ||
+                input.sample.executionStatus === "interrupted"
+              ? input.sample.executionStatus
+              : "completed",
         reservedCost: 0,
         updatedAt: Date.now(),
       })
       scope?.assertActive()
       await db.evalExperiments.update(experiment.id, {
-        spentCost: experiment.spentCost + input.sample.actualCost,
+        spentCost:
+          experiment.spentCost +
+          input.sample.actualCost -
+          (persistedTask.attempts?.find((attempt) => attempt.attempt === input.task.attempt)
+            ?.capturedCostUsd ?? 0),
         reservedCost: Math.max(0, experiment.reservedCost - persistedTask.reservedCost),
         updatedAt: Date.now(),
       })
       scope?.assertActive()
+    }
+  )
+}
+
+/** Account for incurred work even when cancellation prevents task completion. */
+export async function recordEvalAttempt(
+  input: {
+    task: EvalTask
+    observation: EvalAttemptObservation
+    sample?: EvalSampleRow
+    scores?: EvalScoreRow[]
+  },
+  scope?: EvalPersistenceScope
+): Promise<void> {
+  scope?.assertActive()
+  const db = scope?.db ?? getDb()
+  await db.transaction(
+    "rw",
+    [db.evalSamples, db.evalScores, db.evalTasks, db.evalExperiments],
+    async () => {
+      scope?.assertActive()
+      const task = await db.evalTasks.get(input.task.id)
+      const experiment = await db.evalExperiments.get(input.task.experimentId)
+      scope?.assertActive()
+      if (!task || !experiment || task.attempt !== input.observation.attempt) return
+      const previous = task.attempts?.find((item) => item.attempt === input.observation.attempt)
+      const observation = { ...input.observation }
+      // A storage/finalization failure after a returned result cannot erase the
+      // already captured cost for this same attempt.
+      if (observation.capturedCostUsd === undefined && previous?.capturedCostUsd !== undefined) {
+        observation.capturedCostUsd = previous.capturedCostUsd
+        observation.costStatus = previous.costStatus
+      }
+      observation.reservedCostUsd = previous?.reservedCostUsd ?? input.task.reservedCost
+      const ambiguous =
+        observation.costStatus === "unavailable" || observation.costStatus === "partial"
+      observation.unsettledCostUsd = ambiguous
+        ? Math.max(0, observation.reservedCostUsd - (observation.capturedCostUsd ?? 0))
+        : 0
+      const transferredReservation = ambiguous && !previous ? task.reservedCost : 0
+      const attempts = [
+        ...(task.attempts ?? []).filter((item) => item.attempt !== observation.attempt),
+        observation,
+      ]
+      await db.evalTasks.update(task.id, {
+        attempts,
+        ...(transferredReservation > 0 ? { reservedCost: 0 } : {}),
+        unsettledCostReservation: attempts.reduce(
+          (sum, attempt) => sum + (attempt.unsettledCostUsd ?? 0),
+          0
+        ),
+        interruptionSpendAmbiguous: attempts.some(
+          (item) => item.costStatus === "unavailable" || item.costStatus === "partial"
+        ),
+        updatedAt: observation.endedAt,
+      })
+      scope?.assertActive()
+      await db.evalExperiments.update(experiment.id, {
+        spentCost:
+          experiment.spentCost +
+          (observation.capturedCostUsd ?? 0) -
+          (previous?.capturedCostUsd ?? 0),
+        reservedCost: Math.max(
+          0,
+          experiment.reservedCost -
+            transferredReservation +
+            observation.unsettledCostUsd -
+            (previous?.unsettledCostUsd ?? 0)
+        ),
+        updatedAt: observation.endedAt,
+      })
+      scope?.assertActive()
+      if (input.sample) {
+        const existing = await db.evalSamples.get(input.sample.id)
+        if (!existing)
+          await db.evalSamples.add({
+            ...input.sample,
+            attempt: observation.attempt,
+            executionStatus:
+              observation.state === "cancelled" || observation.state === "interrupted"
+                ? observation.state
+                : (input.sample.executionStatus ?? observation.state),
+          })
+        if (input.scores?.length) await db.evalScores.bulkPut(input.scores)
+        scope?.assertActive()
+      }
     }
   )
 }

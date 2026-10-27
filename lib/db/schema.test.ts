@@ -35,6 +35,26 @@ import {
   withDbReopenRetry,
 } from "./schema"
 import type { OutboundJobRow } from "./connector-types"
+
+it("v248 adds media packs while preserving the v247 store shape and existing data", async () => {
+  const name = "cognia-media-v248-upgrade"
+  const old = new Dexie(name)
+  const { petMediaPacks: _media, ...previous } = CURRENT_SCHEMA
+  old.version(247).stores(previous)
+  await old.open()
+  await old.table("petSpritePacks").put({ id: "existing", displayName: "Existing", createdAt: 1 })
+  old.close()
+  const current = new CogniaDB(name)
+  try {
+    await current.open()
+    expect(current.verno).toBe(CURRENT_SCHEMA_VERSION)
+    expect(current.petMediaPacks.schema.primKey.name).toBe("id")
+    expect(await current.petSpritePacks.get("existing")).toMatchObject({ displayName: "Existing" })
+  } finally {
+    current.close()
+    await Dexie.delete(name)
+  }
+})
 import { emit, listen } from "@tauri-apps/api/event"
 import { isTauri } from "@/lib/platform/detect"
 

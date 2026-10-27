@@ -59,6 +59,41 @@ describe("canned-responses", () => {
     expect(await listCanned()).toHaveLength(first.length)
   })
 
+  it("seeds each starter once when multiple consumers initialize concurrently", async () => {
+    const results = await Promise.allSettled(Array.from({ length: 4 }, () => seedBuiltinCanned()))
+
+    expect(results).toEqual(
+      Array.from({ length: 4 }, () => ({ status: "fulfilled", value: undefined }))
+    )
+    expect((await listCanned()).map((response) => response.id)).toEqual([
+      "can-builtin-greeting",
+      "can-builtin-ack",
+      "can-builtin-resolved",
+    ])
+  })
+
+  it("preserves edited starters and usage while concurrent initialization fills missing entries", async () => {
+    await seedBuiltinCanned()
+    await updateCanned("can-builtin-greeting", {
+      title: "Welcome",
+      body: "Custom greeting",
+      category: "Support",
+      sortOrder: 8,
+    })
+    await incrementUsage("can-builtin-greeting")
+    const existing = await getDb().cannedResponses.get("can-builtin-greeting")
+    await getDb().cannedResponses.delete("can-builtin-ack")
+
+    await Promise.all(Array.from({ length: 4 }, () => seedBuiltinCanned()))
+
+    expect(await getDb().cannedResponses.get("can-builtin-greeting")).toEqual(existing)
+    expect(await listCanned()).toHaveLength(3)
+    expect(await getDb().cannedResponses.get("can-builtin-ack")).toMatchObject({
+      title: "Acknowledge",
+      isBuiltIn: true,
+    })
+  })
+
   it("deleteCanned is a no-op for an unknown id", async () => {
     await expect(deleteCanned("missing")).resolves.toBeUndefined()
   })

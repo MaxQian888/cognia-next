@@ -291,6 +291,7 @@ export const CORE_TABLE_NAMES = [
   "petInventory",
   "petModelFiles",
   "petModels",
+  "petMediaPacks",
   "petProfile",
   "petSpritePacks",
   "platformIdentities",
@@ -1260,6 +1261,7 @@ const VERY_LARGE_TABLES = new Set<CoreTableName>([
 ])
 
 const LARGE_TABLES = new Set<CoreTableName>([
+  "petMediaPacks",
   // Live2D model files and Sprite-v2 atlases: real binaries, capped at 50 MiB
   // per model and 25 MiB per atlas. Left at the "medium" default they were
   // budgeted like metadata rows.
@@ -1315,6 +1317,7 @@ const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>
   petModels: "pet",
   petModelFiles: "pet",
   petSpritePacks: "pet",
+  petMediaPacks: "pet",
   sessions: "session",
   messages: "chat",
   messageMediaRefs: "chat",

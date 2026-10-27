@@ -63,7 +63,8 @@ const BUILTIN_LABELS: ReadonlyArray<{ id: string; name: string; color: string }>
 ]
 
 /**
- * Seed the starter built-in labels. Idempotent (skips ids that already exist).
+ * Seed the starter built-in labels. Concurrent calls serialize their reads
+ * and inserts so existing rows are preserved without duplicate-key races.
  *
  * Writes through `getDb().labels` directly rather than `createLabel` because
  * these rows carry fixed, well-known ids that other code and older backups
@@ -72,18 +73,20 @@ const BUILTIN_LABELS: ReadonlyArray<{ id: string; name: string; color: string }>
 export async function seedBuiltinLabels(): Promise<void> {
   const db = getDb()
   const now = Date.now()
-  for (let i = 0; i < BUILTIN_LABELS.length; i++) {
-    const b = BUILTIN_LABELS[i]
-    if (await db.labels.get(b.id)) continue
-    await db.labels.add({
-      id: b.id,
-      scope: "conversation",
-      name: b.name,
-      color: b.color,
-      builtin: true,
-      sortOrder: i,
-      createdAt: now,
-      updatedAt: now,
-    })
-  }
+  await db.transaction("rw", db.labels, async () => {
+    for (let i = 0; i < BUILTIN_LABELS.length; i++) {
+      const b = BUILTIN_LABELS[i]
+      if (await db.labels.get(b.id)) continue
+      await db.labels.add({
+        id: b.id,
+        scope: "conversation",
+        name: b.name,
+        color: b.color,
+        builtin: true,
+        sortOrder: i,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  })
 }

@@ -7,6 +7,7 @@ import { reduceRunEvents } from "@/lib/execution/run-reducer"
 
 import { __resetDbForTesting, getDb } from "./schema"
 import {
+  appendRunEventsInsideTransaction,
   createExecutionRun,
   createExecutionRunBinding,
   getExecutionRun,
@@ -313,6 +314,43 @@ describe("execution run journal", () => {
         payload: {},
       })
     ).rejects.toThrow("Execution run not found: missing-run")
+  })
+
+  it("rolls a transaction-scoped batch back with its parent transaction", async () => {
+    const run: ExecutionRun = {
+      id: "parent-transaction-run",
+      kind: "plan",
+      sourceId: "plan-1",
+      title: "Plan",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    }
+    await createExecutionRun(run)
+    const db = getDb()
+
+    await expect(
+      db.transaction(
+        "rw",
+        db.executionRuns,
+        db.executionRunEvents,
+        db.notificationProjectionWork,
+        async () => {
+          await appendRunEventsInsideTransaction(db, run.id, [
+            semanticRunEvent("step.added", { stepId: "step-1" }, { ts: 2 }),
+            semanticRunEvent("run.completed", {}, { ts: 3 }),
+          ])
+          throw new Error("Abort parent transaction")
+        }
+      )
+    ).rejects.toThrow("Abort parent transaction")
+
+    expect(await getExecutionRun(run.id)).toEqual(run)
+    expect(await listExecutionRunEvents(run.id)).toEqual([])
+    expect(await db.notificationProjectionWork.filter((row) => row.runId === run.id).count()).toBe(
+      0
+    )
   })
 
   it("keeps terminal runs immutable while preserving duplicate delivery idempotency", async () => {

@@ -13,6 +13,7 @@ import {
   commitMessageDelta,
   deleteStoredMessage,
   listMessages,
+  rowToUIMessage,
   listRecentMessages,
   persistMessages,
   persistStreamingMessages,
@@ -22,6 +23,7 @@ import {
   truncateAfter,
   updateMessageMetadata,
   ImageEditAppendError,
+  invalidatePersistSnapshot,
 } from "./messages"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -35,6 +37,41 @@ import {
 import { composeTurnText } from "@/lib/chat/prompt-preamble"
 import { putSessionAsset, getSessionAsset, persistMessageSessionAssets } from "./session-assets"
 import * as revisionEvents from "@/lib/chat/transcript/revision-events"
+
+it("canonicalizes malformed IM history without replaying historical media payloads", () => {
+  const row = {
+    id: "legacy-media",
+    sessionId: "session",
+    role: "user",
+    createdAt: 1,
+    metadata: { platformMessage: { platform: "matrix", messageId: "!room|$event" } },
+    parts: [
+      null,
+      { type: "text", text: 42 },
+      { type: "text", text: "caption" },
+      { type: "file", url: "data:image/png;base64,DISPLAY_SENTINEL", mediaType: "image/png" },
+    ],
+  }
+  expect(rowToUIMessage(row as never).parts).toEqual([
+    { type: "text", text: "caption" },
+    { type: "text", text: "[image]" },
+  ])
+})
+
+it.each([{ platformMessage: null }, { inboundA2UI: {} }])(
+  "scrubs legacy display bytes with malformed IM provenance %p",
+  (metadata) => {
+    const row = {
+      id: "legacy",
+      sessionId: "session",
+      role: "user",
+      parts: [{ type: "text", text: "[image: data:image/png;base64,DISPLAY]" }],
+      createdAt: 1,
+      metadata,
+    }
+    expect(rowToUIMessage(row as never).parts).toEqual([{ type: "text", text: "[image]" }])
+  }
+)
 
 jest.mock("@/lib/chat/transcript/revision-events", () => {
   const actual = jest.requireActual("@/lib/chat/transcript/revision-events")
@@ -82,6 +119,274 @@ beforeEach(async () => {
   await getDb().messages.clear()
 })
 afterAll(dbFixture.dispose)
+
+it("retains a terminal continuation stamp when a delayed streaming snapshot is persisted", async () => {
+  await putSession("continuation")
+  const user: UIMessage = {
+    id: "resume-u",
+    role: "user",
+    parts: [{ type: "text", text: "Implement it" }],
+  }
+  await persistMessages("continuation", [user])
+  const chatTurnOutcome = { state: "interrupted", revision: 2, retryable: true }
+  await updateMessageMetadata("continuation", user.id, { chatTurnOutcome })
+  await persistMessages("continuation", [
+    { ...user, parts: [{ type: "text", text: "Implement it now" }] },
+  ])
+  expect((await listMessages("continuation"))[0].metadata).toMatchObject({ chatTurnOutcome })
+  await commitMessageDelta("continuation", {
+    upserts: [{ ...user, parts: [{ type: "text", text: "Delayed partial write" }] }],
+  })
+  expect((await listMessages("continuation"))[0].metadata).toMatchObject({ chatTurnOutcome })
+  await persistStreamingMessages("continuation", [
+    { ...user, parts: [{ type: "text", text: "Delayed streaming write" }] },
+  ])
+  expect((await listMessages("continuation"))[0].metadata).toMatchObject({ chatTurnOutcome })
+})
+
+it("keeps a locally refused HostState message through transcript replacement", async () => {
+  await putSession("refused-host")
+  await getDb().messages.put({
+    id: "refused",
+    sessionId: "refused-host",
+    role: "user",
+    parts: [{ type: "text", text: "keep what I typed" }],
+    metadata: {
+      hostState: {
+        optimistic: true,
+        refusal: { code: "model_access_unavailable", at: 123 },
+        attachmentRefs: [{ name: "notes.txt", mediaType: "text/plain", size: 4 }],
+      },
+    },
+    createdAt: 100,
+  })
+  await replaceSessionTranscript("refused-host", [])
+  await replaceSessionTranscript("refused-host", [msg("confirmed", "assistant", "later")])
+  await expect(getDb().messages.get("refused")).resolves.toMatchObject({
+    parts: [{ type: "text", text: "keep what I typed" }],
+    metadata: { hostState: { refusal: { code: "model_access_unavailable" } } },
+  })
+  // Explicit user deletion still removes the local copy.
+  await deleteStoredMessage("refused")
+  await expect(getDb().messages.get("refused")).resolves.toBeUndefined()
+})
+
+it("merges metadata against the current recall tombstone inside the write transaction", async () => {
+  await putSession("metadata-recall")
+  await persistMessages("metadata-recall", [
+    {
+      id: "metadata-im",
+      role: "user",
+      parts: [{ type: "text", text: "original" }],
+      metadata: {
+        platformMessage: { messageId: "remote", platform: "lark" },
+        inboundA2UI: { v: 1, source: "lark", body: [{ kind: "text", text: "secret" }] },
+      },
+    } as UIMessage,
+  ])
+  const db = getDb()
+  const originalGet = db.sessions.get.bind(db.sessions)
+  const get = jest.spyOn(db.sessions, "get").mockImplementationOnce((async (...args: unknown[]) => {
+    const row = await db.messages.get("metadata-im")
+    const { inboundA2UI: _rich, ...metadata } = row!.metadata! as Record<string, unknown>
+    await db.messages.update("metadata-im", {
+      parts: [{ type: "text", text: "[deleted]" }],
+      metadata: { ...metadata, deletedAt: 10 },
+    })
+    return originalGet(...(args as [string]))
+  }) as never)
+  try {
+    await updateMessageMetadata("metadata-recall", "metadata-im", { minimapLabel: "label" })
+  } finally {
+    get.mockRestore()
+  }
+  const row = await db.messages.get("metadata-im")
+  expect(row?.metadata?.deletedAt).toBe(10)
+  expect(row?.metadata?.inboundA2UI).toBeUndefined()
+  expect(row?.metadata?.minimapLabel).toBe("label")
+})
+
+it.each([
+  persistMessages,
+  persistStreamingMessages,
+  async (id: string, rows: UIMessage[]) => commitMessageDelta(id, { upserts: rows }),
+])(
+  "preserves connector revisions and message lookup keys against stale transcript writes",
+  async (persist) => {
+    await putSession("im-revision")
+    await getDb().messages.put({
+      id: "im-row",
+      sessionId: "im-revision",
+      role: "user",
+      createdAt: 1,
+      platformMessageId: "remote-1",
+      parts: [{ type: "text", text: "original" }],
+      metadata: { platformMessage: { messageId: "remote-1", platform: "telegram" } },
+    } as never)
+    const stale = await listMessages("im-revision")
+    await persistMessages("im-revision", stale)
+    expect((await getDb().messages.get("im-row"))?.platformMessageId).toBe("remote-1")
+    const transportHistory = {
+      inboundEditBase: { parts: [{ type: "text", text: "original" }] },
+      inboundMutationRevision: { jobId: "inbound-job", revision: 2 },
+      inboundMatrixRevisions: {
+        edits: {
+          "!r:s|$edit": {
+            revision: { at: 2, order: "$edit" },
+            parts: [{ type: "text", text: "latest" }],
+          },
+        },
+        redactedEditIds: [],
+      },
+    }
+    await getDb().messages.update("im-row", {
+      parts: [{ type: "text", text: "[deleted]" }],
+      metadata: {
+        ...(stale[0].metadata as Record<string, unknown>),
+        ...transportHistory,
+        deletedAt: 100,
+      },
+    })
+    invalidatePersistSnapshot("im-revision")
+    await persist("im-revision", stale)
+    const row = await getDb().messages.get("im-row")
+    expect(row?.parts).toEqual([{ type: "text", text: "[deleted]" }])
+    expect(row?.metadata?.deletedAt).toBe(100)
+    expect(row?.metadata?.inboundEditBase).toEqual(transportHistory.inboundEditBase)
+    expect(row?.metadata?.inboundMatrixRevisions).toEqual(transportHistory.inboundMatrixRevisions)
+    expect(row?.metadata?.inboundMutationRevision).toEqual(transportHistory.inboundMutationRevision)
+    expect(row?.platformMessageId).toBe("remote-1")
+  }
+)
+
+it.each(
+  (["dingtalk", "wecom", "onebot", "qq-official", "matrix"] as const).flatMap((platform) =>
+    (
+      [
+        ["full", persistMessages],
+        ["streaming", persistStreamingMessages],
+      ] as const
+    ).map(([writer, persist]) => ({ platform, writer, persist }))
+  )
+)(
+  "keeps $platform revisions when $writer stale snapshots omit and later restore their source",
+  async ({ platform, persist }) => {
+    const sessionId = "omitted-inbound"
+    await putSession(sessionId)
+    const db = getDb()
+    const platformMessage = (messageId: string) => ({
+      platform,
+      messageId,
+      adapterId: "adapter",
+      conversationKey: `${platform}:adapter:chat`,
+      sender: { id: "sender", platform, adapterId: "adapter", remoteUserId: "sender" },
+    })
+    const oldRich = {
+      v: 1,
+      source: platform,
+      body: [{ kind: "image", src: "data:image/png;base64,WITHDRAWN_DISPLAY" }],
+    }
+    for (const id of ["edited-source", "recalled-source"]) {
+      await db.messages.put({
+        id,
+        sessionId,
+        role: "user",
+        platformMessageId: id,
+        parts: [
+          { type: "text", text: "original" },
+          { type: "file", url: "data:image/png;base64,OLD_DISPLAY", mediaType: "image/png" },
+        ],
+        metadata: { platformMessage: platformMessage(id), inboundA2UI: oldRich },
+        createdAt: 1,
+      } as never)
+    }
+    await db.messages.put({
+      id: "ordinary-source",
+      sessionId,
+      role: "assistant",
+      parts: [{ type: "text", text: "ordinary" }],
+      createdAt: 2,
+    })
+    const stale = await listMessages(sessionId)
+    await persistMessages(sessionId, stale)
+    await db.messages.update("edited-source", {
+      parts: [{ type: "text", text: "newest revision" }],
+      metadata: {
+        platformMessage: platformMessage("edited-source"),
+        editedAt: 3,
+        editCount: 1,
+        inboundEditRevision: { at: 3 },
+      },
+    })
+    await db.messages.update("recalled-source", {
+      parts: [{ type: "text", text: "[deleted]" }],
+      metadata: { platformMessage: platformMessage("recalled-source"), deletedAt: 4 },
+    })
+    invalidatePersistSnapshot(sessionId)
+
+    // Separate windows may hold an empty pane or a pane that never received
+    // these platform rows. Neither omission transfers ownership of their content.
+    await persist(sessionId, [])
+    const afterEmpty = await db.messages.bulkGet(["edited-source", "recalled-source"])
+    const local = {
+      id: "local-follow-up",
+      role: "user",
+      parts: [{ type: "text", text: "follow-up" }],
+      metadata: { triggerWorkflows: false },
+    } as UIMessage
+    await persist(sessionId, [local])
+    const afterMissing = await db.messages.bulkGet(["edited-source", "recalled-source"])
+    const ordinaryAfterOmission = await db.messages.get("ordinary-source")
+    // A later stale window writes its old copy of the same platform rows.
+    await persist(sessionId, [...stale, local])
+
+    const edited = await db.messages.get("edited-source")
+    const recalled = await db.messages.get("recalled-source")
+    expect(edited?.parts).toEqual([{ type: "text", text: "newest revision" }])
+    expect(edited?.metadata?.inboundEditRevision).toEqual({ at: 3 })
+    expect(recalled?.parts).toEqual([{ type: "text", text: "[deleted]" }])
+    expect(recalled?.metadata?.deletedAt).toBe(4)
+    for (const row of [...afterEmpty, ...afterMissing, edited, recalled]) {
+      expect(row).toBeDefined()
+      expect(row?.metadata?.inboundA2UI).toBeUndefined()
+      expect(JSON.stringify(rowToUIMessage(row!).parts)).not.toMatch(/DISPLAY|data:image/)
+    }
+    expect(ordinaryAfterOmission).toBeUndefined()
+    expect(
+      (await listMessages(sessionId)).filter((message) => message.id === "edited-source")
+    ).toHaveLength(1)
+  }
+)
+
+it.each([
+  ["clear", (sessionId: string) => clearMessages(sessionId)],
+  ["delete", (_sessionId: string) => deleteStoredMessage("explicit-inbound")],
+  [
+    "truncate",
+    (sessionId: string) => truncateAfter(sessionId, "explicit-inbound", { inclusive: true }),
+  ],
+  [
+    "delta",
+    (sessionId: string) => commitMessageDelta(sessionId, { deleteIds: ["explicit-inbound"] }),
+  ],
+] as const)(
+  "keeps explicit %s operations available for connector tombstones",
+  async (_kind, remove) => {
+    const sessionId = "explicit-inbound-delete"
+    await putSession(sessionId)
+    await getDb().messages.put({
+      id: "explicit-inbound",
+      sessionId,
+      role: "user",
+      parts: [{ type: "text", text: "[deleted]" }],
+      platformMessageId: "remote",
+      metadata: { platformMessage: { platform: "matrix", messageId: "remote" }, deletedAt: 4 },
+      createdAt: 1,
+    } as never)
+    await remove(sessionId)
+    expect(await getDb().messages.get("explicit-inbound")).toBeUndefined()
+  }
+)
 
 it.each([persistMessages, persistStreamingMessages])(
   "does not restore an obsolete runtime transcript after asynchronous media preparation",
@@ -202,6 +507,61 @@ function msg(
 }
 
 describe("persistMessages + listMessages", () => {
+  it.each([
+    { writer: "full", persist: persistMessages },
+    { writer: "streaming", persist: persistStreamingMessages },
+    {
+      writer: "delta",
+      persist: (sessionId: string, messages: UIMessage[]) =>
+        commitMessageDelta(sessionId, { upserts: messages }),
+    },
+  ])(
+    "keeps the first live timestamp through $writer persistence and reload",
+    async ({ persist }) => {
+      const sessionId = "live-timestamp"
+      await putSession(sessionId)
+      const message: UIMessage = {
+        id: "timestamp-answer",
+        role: "assistant",
+        parts: [{ type: "text", text: "partial" }],
+        metadata: { createdAt: 1_000 },
+      }
+      await persist(sessionId, [message])
+      expect((await listMessages(sessionId))[0].metadata).toMatchObject({ createdAt: 1_000 })
+      // A stale or arbitrary later metadata stamp cannot move an existing row.
+      await persist(sessionId, [{ ...message, metadata: { createdAt: 9_000 } }])
+      expect((await getDb().messages.get(message.id))?.createdAt).toBe(1_000)
+      expect((await listMessages(sessionId))[0].metadata).toMatchObject({ createdAt: 1_000 })
+      expect((await getDb().messages.get(message.id))?.metadata ?? {}).not.toHaveProperty(
+        "createdAt"
+      )
+    }
+  )
+
+  it.each([undefined, NaN, Infinity, "1000"])(
+    "uses the persistence clock for invalid live timestamp %p in full and delta writes",
+    async (createdAt) => {
+      const clock = jest.spyOn(Date, "now").mockReturnValue(10_000)
+      try {
+        await putSession("invalid-live-time")
+        const message: UIMessage = {
+          id: "invalid-full",
+          role: "assistant",
+          parts: [{ type: "text", text: "answer" }],
+          metadata: { createdAt },
+        }
+        await persistMessages("invalid-live-time", [message])
+        await commitMessageDelta("invalid-live-time", {
+          upserts: [{ ...message, id: "invalid-delta" }],
+        })
+        expect((await getDb().messages.get("invalid-full"))?.createdAt).toBe(10_000)
+        expect((await getDb().messages.get("invalid-delta"))?.createdAt).toBe(10_000)
+      } finally {
+        clock.mockRestore()
+      }
+    }
+  )
+
   it("rejects an account switch between attachment preparation stages", async () => {
     const db = getDb()
     const mockDb = jest.mocked(getDb)
@@ -1027,6 +1387,75 @@ describe("workspace (project) scoping", () => {
 })
 
 describe("last-message preview denormalization", () => {
+  it.each(["older tail", "empty snapshot"])(
+    "keeps the newest surviving inbound preview through a stale %s",
+    async (snapshot) => {
+      const sessionId = "preview-inbound"
+      await putSession(sessionId)
+      const db = getDb()
+      const assistant = {
+        id: "preview-old-answer",
+        sessionId,
+        role: "assistant" as const,
+        parts: [{ type: "text" as const, text: "old answer" }],
+        createdAt: 100,
+      }
+      await db.messages.bulkPut([
+        assistant,
+        {
+          id: "preview-inbound",
+          sessionId,
+          role: "user",
+          parts: [{ type: "text", text: "new inbound" }],
+          metadata: { platformMessage: { platform: "onebot", messageId: "remote-preview" } },
+          createdAt: 200,
+        } as never,
+      ])
+      await db.sessions.update(sessionId, { lastMessagePreview: "new inbound", lastMessageAt: 200 })
+      await persistMessages(sessionId, snapshot === "older tail" ? [rowToUIMessage(assistant)] : [])
+      expect(await db.sessions.get(sessionId)).toMatchObject({
+        lastMessagePreview: "new inbound",
+        lastMessageAt: 200,
+      })
+      expect(await db.messages.get("preview-inbound")).toBeDefined()
+    }
+  )
+
+  it("allows the preview to move back after explicit truncation removes the newer inbound", async () => {
+    const sessionId = "preview-truncated"
+    await putSession(sessionId)
+    const db = getDb()
+    const assistant = {
+      id: "preview-anchor",
+      sessionId,
+      role: "assistant" as const,
+      parts: [{ type: "text" as const, text: "surviving answer" }],
+      createdAt: 100,
+    }
+    await db.messages.bulkPut([
+      assistant,
+      {
+        id: "preview-removed-inbound",
+        sessionId,
+        role: "user",
+        parts: [{ type: "text", text: "removed inbound" }],
+        metadata: { platformMessage: { platform: "onebot", messageId: "remote-truncated" } },
+        createdAt: 200,
+      } as never,
+    ])
+    await db.sessions.update(sessionId, {
+      lastMessagePreview: "removed inbound",
+      lastMessageAt: 200,
+    })
+    await truncateAfter(sessionId, assistant.id)
+    await persistMessages(sessionId, [rowToUIMessage(assistant)])
+    expect(await db.messages.get("preview-removed-inbound")).toBeUndefined()
+    expect(await db.sessions.get(sessionId)).toMatchObject({
+      lastMessagePreview: "surviving answer",
+      lastMessageAt: 100,
+    })
+  })
+
   it("writes a capped preview + timestamp onto the session row", async () => {
     await putSession("s-prev")
     await persistMessages("s-prev", [msg("a", "user", "hello world")])

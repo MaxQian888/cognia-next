@@ -1072,13 +1072,7 @@ const HARNESS_EVOLUTION_SCHEMA = {
     "&id, characterId, scope, validationStatus, domain, projectId, sourceRunId, updatedAt",
 }
 
-// v249 — the outbound authorization keys (ADR-0239): fence entries and
-// instruction grants, one per target, as a multiEntry index on the receipts.
-const ACTION_REVIEW_AUTH_SCHEMA = {
-  actionReviewReceipts:
-    "&id, decidedAt, expiresAt, outcome, authority, tier, channel, sessionId, runId, projectId, [channel+decidedAt], [sessionId+decidedAt], *surfaceIds, *authKeys",
-}
-export const CURRENT_SCHEMA: Record<string, string | null> = {
+const SCHEMA_V247: Record<string, string | null> = {
   ...SCHEMA_V240,
   ...SESSION_LIST_SCHEMA,
   ...SESSION_LIST_SOURCE_SCHEMA,
@@ -1086,6 +1080,18 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   ...MANAGED_DESKTOP_DELETION_SCHEMA,
   ...PROMPT_OVERRIDE_SCHEMA,
   ...HARNESS_EVOLUTION_SCHEMA,
+}
+
+const MEDIA_PACK_SCHEMA = { petMediaPacks: "&id, displayName, createdAt" }
+// v249 — the outbound authorization keys (ADR-0239): fence entries and
+// instruction grants, one per target, as a multiEntry index on the receipts.
+const ACTION_REVIEW_AUTH_SCHEMA = {
+  actionReviewReceipts:
+    "&id, decidedAt, expiresAt, outcome, authority, tier, channel, sessionId, runId, projectId, [channel+decidedAt], [sessionId+decidedAt], *surfaceIds, *authKeys",
+}
+export const CURRENT_SCHEMA: Record<string, string | null> = {
+  ...SCHEMA_V247,
+  ...MEDIA_PACK_SCHEMA,
   ...ACTION_REVIEW_AUTH_SCHEMA,
 }
 
@@ -1703,7 +1709,9 @@ export class CogniaDB extends Dexie {
     this.version(240).stores(SCHEMA_V240).upgrade(backfillMessageSyncRevision)
     this.version(241).stores(SESSION_LIST_SCHEMA).upgrade(backfillSessionList)
     this.version(242).stores({}).upgrade(backfillSessionList)
-    this.version(CURRENT_SCHEMA_VERSION).stores(CURRENT_SCHEMA)
+    this.version(247).stores(SCHEMA_V247)
+    this.version(248).stores(MEDIA_PACK_SCHEMA)
+    this.version(CURRENT_SCHEMA_VERSION).stores(ACTION_REVIEW_AUTH_SCHEMA)
   }
 
   messageSyncClock!: Table<MessageSyncClock, "singleton">
@@ -1903,6 +1911,7 @@ export class CogniaDB extends Dexie {
   petModelFiles!: Table<PetModelFileRow, string>
   // v119 — Codex-compatible v2 sprite pet packs. See `lib/db/pet-sprite-packs.ts`.
   petSpritePacks!: Table<import("./pet-sprite-packs").PetSpritePackRow, string>
+  petMediaPacks!: Table<import("./pet-media-packs").PetMediaPackRow, string>
   // v74 — Terminal durable history + unattended-exec audit.
   terminalHistory!: Table<TerminalHistoryRow, string>
   unattendedExecAudit!: Table<UnattendedExecAuditRow, string>

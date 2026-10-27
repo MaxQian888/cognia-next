@@ -90,22 +90,24 @@ const BUILTIN_CANNED: ReadonlyArray<{ id: string; title: string; body: string }>
   },
 ]
 
-/** Seed the starter canned responses. Idempotent. */
+/** Seed missing starters atomically, preserving existing rows across concurrent calls. */
 export async function seedBuiltinCanned(): Promise<void> {
   const db = getDb()
   const now = Date.now()
-  for (let i = 0; i < BUILTIN_CANNED.length; i++) {
-    const b = BUILTIN_CANNED[i]
-    if (await db.cannedResponses.get(b.id)) continue
-    await db.cannedResponses.add({
-      id: b.id,
-      title: b.title,
-      body: b.body,
-      isBuiltIn: true,
-      sortOrder: i,
-      usageCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    })
-  }
+  await db.transaction("rw", db.cannedResponses, async () => {
+    for (let i = 0; i < BUILTIN_CANNED.length; i++) {
+      const b = BUILTIN_CANNED[i]
+      if (await db.cannedResponses.get(b.id)) continue
+      await db.cannedResponses.add({
+        id: b.id,
+        title: b.title,
+        body: b.body,
+        isBuiltIn: true,
+        sortOrder: i,
+        usageCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+  })
 }
