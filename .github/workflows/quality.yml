@@ -164,7 +164,7 @@ jobs:
 
       - name: Setup uv
         if: matrix.python
-        uses: astral-sh/setup-uv@v10.3.0
+        uses: astral-sh/setup-uv@v10.3.3
 
       # `components:` is not optional here — dtolnay/rust-toolchain installs
       # the minimal profile, which ships neither clippy nor rustfmt.
