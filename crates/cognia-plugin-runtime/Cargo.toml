@@ -48,12 +48,12 @@ tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-clipboard-manager = { workspace = true, optional = true }
 tauri-plugin-opener = { workspace = true, optional = true }
 # The WASM component host — the compile monster this crate isolates.
-wasmtime = { version = "=49.0.4", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime = { version = "=49.0.5", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
 # The linker registers Preview 2 only. Defaults also compile the unused
 # Preview 1 adapter (wiggle) and Preview 3 component async support.
-wasmtime-wasi = { version = "=49.0.4", default-features = false, features = ["p2"] }
+wasmtime-wasi = { version = "=49.0.5", default-features = false, features = ["p2"] }
 # Component/manifest validation during install.
-wasmparser = "0.261"
+wasmparser = "0.262"
 # Bounded child-process shutdown in the python host.
 wait-timeout.workspace = true
 serde = { workspace = true, features = ["derive"] }
