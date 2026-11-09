@@ -204,7 +204,7 @@ serde_json = { version = "1" }
 tokio = { version = "1" }
 thiserror = { version = "2" }
 tempfile = { version = "3" }
-parking_lot = { version = "0.12" }
+parking_lot = { version = "0.13" }
 base64 = { version = "0.23" }
 uuid = { version = "1" }
 # The signaling relay's wire crate (ADR-0021), owned by the services
@@ -249,7 +249,7 @@ tracing-subscriber = { version = "0.3" }
 aes-gcm = { version = "0.11" }
 git2 = { version = "0.21", default-features = false }
 jsonwebtoken = { version = "11" }
-sysinfo = { version = "0.39", default-features = false }
+sysinfo = { version = "0.40", default-features = false }
 tar = { version = "0.4" }
 toml_edit = { version = "0.25" }
 wait-timeout = { version = "0.2" }
