@@ -61,7 +61,7 @@ zip = { workspace = true, features = ["deflate-flate2-zlib-rs", "bzip2"] }
 libc.workspace = true
 
 [dev-dependencies]
-axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+axum-server = { version = "0.9", features = ["tls-rustls-no-provider"] }
 cognia-companion = { path = "../cognia-companion", features = ["test-support"] }
 cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
 tempfile.workspace = true

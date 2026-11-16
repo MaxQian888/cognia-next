@@ -64,16 +64,16 @@ async-trait.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
 # WebDAV: Apache-2.0, http 1 / hyper 1 like axum 0.8. No bundled
 # filesystems: every operation goes through the gateway.
-dav-server = { version = "0.11", default-features = false }
+dav-server = { version = "0.12", default-features = false }
 axum.workspace = true
-axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+axum-server = { version = "0.9", features = ["tls-rustls-no-provider"] }
 http = "1"
 headers = "0.4"
 # LAN exposure: the addresses a client on the same network can dial.
 local-ip-address = "0.6"
 # SFTP: the same pinned russh line `cognia-terminal` uses (ring backend, no
 # `rsa` feature — RUSTSEC-2023-0071), as a server this time.
-russh = { version = "=0.63.3", default-features = false, features = ["ring"] }
+russh = { version = "=0.65.1", default-features = false, features = ["ring"] }
 russh-sftp = "3.0"
 tauri = { workspace = true, optional = true, features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 
