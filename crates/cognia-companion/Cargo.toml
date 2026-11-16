@@ -84,7 +84,7 @@ tauri = { workspace = true, optional = true }
 aes-gcm = { workspace = true, features = ["aes"] }
 async-trait.workspace = true
 axum = { workspace = true, features = ["macros", "multipart", "ws"] }
-axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+axum-server = { version = "0.9", features = ["tls-rustls-no-provider"] }
 base64.workspace = true
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
