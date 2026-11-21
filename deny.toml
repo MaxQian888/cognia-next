@@ -22,11 +22,6 @@ ignore = [
   # without replacing Tauri's GTK ABI. Keep this exact advisory visible here
   # until Tauri/Wry migrate their Linux runtime.
   { id = "RUSTSEC-2024-0429", reason = "Tauri 2 Linux GTK3 ABI constraint; affected VariantStrIter API is not used" },
-  # xcb 1.7 is xcap's current Linux X11 backend. quick-xml is build-only and
-  # parses protocol XML embedded in the xcb crate, never untrusted input, so
-  # the two runtime DoS paths are unreachable. Remove when xcb upgrades.
-  { id = "RUSTSEC-2026-0194", reason = "xcb build-only parser consumes crate-owned protocol XML" },
-  { id = "RUSTSEC-2026-0195", reason = "xcb build-only parser consumes crate-owned protocol XML" },
   # matrix-sdk 0.18 pulls bitmaps through imbl. The affected raw-byte
   # conversion/mutation APIs are not used by imbl, eyeball-im, matrix-sdk, or
   # Cognia; no maintained replacement or patched release exists yet.
