@@ -37,7 +37,7 @@ cognia-signaling-core.workspace = true
 # may take compatible 0.20.x fixes. Re-exported as `webrtc`.
 webrtc = "0.21.0"
 # `_cognia._tcp.local.` advertisement and discovery (`mdns`).
-mdns-sd = "0.21"
+mdns-sd = "0.22"
 # LAN and mesh-VPN interface enumeration (`mdns`, `mesh`).
 local-ip-address = "0.6"
 # Self-signed listener certificate; the client pins its SPKI fingerprint, so
